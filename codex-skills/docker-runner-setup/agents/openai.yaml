@@ -1,0 +1,4 @@
+interface:
+  display_name: "Docker Runner Setup"
+  short_description: "Prepare a safe Docker host for TACO"
+  default_prompt: "Help me set up Docker on a safe Linux runner for TACO."

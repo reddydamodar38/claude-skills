@@ -1,0 +1,4 @@
+interface:
+  display_name: "Abilities Center Guide"
+  short_description: "Find Abilities Center tools, docs, and workflows"
+  default_prompt: "Use $abilities-center-guide to answer an Abilities Center tools or process question."

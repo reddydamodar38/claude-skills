@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Workflow Guide"
+  short_description: "Guide commit, push, PR, and release workflows"
+  default_prompt: "Use $repo-workflow-guide to help with repo setup, repo access, commit/push flow, PR creation, or release checks."

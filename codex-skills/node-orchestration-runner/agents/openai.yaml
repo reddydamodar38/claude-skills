@@ -1,0 +1,4 @@
+interface:
+  display_name: "Node Orchestration Runner"
+  short_description: "Run node-orchestration automation safely"
+  default_prompt: "Help me choose and run the correct node-orchestration command."

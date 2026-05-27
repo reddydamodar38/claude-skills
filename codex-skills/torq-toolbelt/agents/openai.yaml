@@ -1,0 +1,4 @@
+interface:
+  display_name: "TORQ Toolbelt"
+  short_description: "Help with TORQ jobs, config, and failures"
+  default_prompt: "Use $torq-toolbelt to answer a TORQ config, pipeline, or troubleshooting question."

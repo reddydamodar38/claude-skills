@@ -1,0 +1,4 @@
+interface:
+  display_name: "CleanPlant"
+  short_description: "Eggplant scale-test cleanup workflow"
+  default_prompt: "Use $cleanplant to clean this Eggplant script for scale testing."

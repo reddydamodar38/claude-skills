@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Skills Updater"
+  short_description: "Update and sync local codex-skills installs"
+  default_prompt: "Update my codex-skills repo and install any new skills."

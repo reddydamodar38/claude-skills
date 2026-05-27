@@ -1,0 +1,4 @@
+interface:
+  display_name: "SSH Win"
+  short_description: "Connect to remote Windows hosts via RDP/SSH"
+  default_prompt: "Use this skill to launch Windows RDP sessions, run SSH commands on Windows, and advise passwordless login setup."
