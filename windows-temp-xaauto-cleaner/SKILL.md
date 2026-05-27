@@ -1,6 +1,6 @@
 ---
 name: windows-temp-xaauto-cleaner
-description: Clean files/folders containing xaauto from Windows Temp locations across multiple nodes, tolerate locked files, and empty Recycle Bin. Use when users ask to run bulk Windows temp cleanup with editable host list and domain credentials.
+description: Clean files/folders containing xaauto from Windows temp locations across multiple nodes, including a C:\Temp-only mode, tolerate locked files, and optionally empty Recycle Bin.
 ---
 
 # Windows Temp Xaauto Cleaner
@@ -12,15 +12,17 @@ Use this skill to clean Windows nodes remotely when temp folders contain `xaauto
 - `domainUser`: domain username (format: `domain\\user`)
 - `password`: use secure prompt (recommended), or pass inline only if explicitly requested
 - `targetPattern`: default `*xaauto*`
+- `paths`: cleanup scope (default: `$env:TEMP` and `C:\Windows\Temp`; optional: `C:\Temp` only)
 
 ## Behavior
 1. Connect to all listed Windows nodes via PowerShell Remoting (`Invoke-Command`).
-2. Search these locations:
+2. Search configured temp locations. Default:
 - `$env:TEMP`
 - `C:\Windows\Temp`
-3. Delete all matching files/folders recursively.
-4. Ignore undeletable/locked items (`SilentlyContinue`).
-5. Empty Recycle Bin on each node.
+3. Optional mode: search `C:\Temp` only when explicitly requested.
+4. Delete all matching files/folders recursively.
+5. Ignore undeletable/locked items (`SilentlyContinue`).
+6. Empty Recycle Bin on each node only if requested.
 
 ## Recommended Command (PowerShell)
 ```powershell
@@ -55,6 +57,34 @@ Invoke-Command -ComputerName $nodes -Credential $cred -ScriptBlock {
   }
 
   Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+}
+```
+
+## C:\Temp-Only Command (PowerShell)
+Use this when the user explicitly says to delete only under `C:\Temp`.
+
+```powershell
+$domainUser = 'dh2\\ablscale3cert'
+$password = Read-Host "Password for $domainUser" -AsSecureString
+$cred = New-Object System.Management.Automation.PSCredential($domainUser, $password)
+
+$nodes = @(
+  'DH2VABLSCL2SUT2',
+  'DH2VABLSCL2SUT3',
+  'DH2VABLSCL2SUT4',
+  'DH2VABLSCL2SUT5'
+)
+
+Invoke-Command -ComputerName $nodes -Credential $cred -ScriptBlock {
+  $ErrorActionPreference = 'SilentlyContinue'
+  $targetPattern = '*xaauto*'
+  $path = 'C:\Temp'
+
+  if (Test-Path -LiteralPath $path) {
+    Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue |
+      Where-Object { $_.FullName -like $targetPattern } |
+      Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }
 ```
 
@@ -96,3 +126,4 @@ Invoke-Command -ComputerName \$nodes -Credential \$cred -ScriptBlock {
 - If required, run a dry run first by replacing `Remove-Item` with:
   `Select-Object FullName`.
 - Locked files are expected and ignored by design.
+- When the user asks for path-restricted cleanup (for example `C:\Temp` only), do not scan other temp locations.
