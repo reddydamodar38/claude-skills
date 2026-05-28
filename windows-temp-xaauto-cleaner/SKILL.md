@@ -23,6 +23,7 @@ Use this skill to clean Windows nodes remotely when temp folders contain `xaauto
 4. Delete all matching files/folders recursively.
 5. Ignore undeletable/locked items (`SilentlyContinue`).
 6. Empty Recycle Bin on each node only if requested.
+7. If Recycle Bin still has content, force-delete `C:\$Recycle.Bin\*` as a fallback.
 
 ## Recommended Command (PowerShell)
 ```powershell
@@ -88,6 +89,42 @@ Invoke-Command -ComputerName $nodes -Credential $cred -ScriptBlock {
 }
 ```
 
+## Recycle Bin Cleanup (PowerShell, with Fallback)
+Use this when the user asks to clear recycle-bin content after temp cleanup.
+
+```powershell
+$domainUser = 'dh2\\ablscale3cert'
+$password = Read-Host "Password for $domainUser" -AsSecureString
+$cred = New-Object System.Management.Automation.PSCredential($domainUser, $password)
+
+$nodes = @(
+  'DH2VABLSCL3CTX5',
+  'DH2VABLSCL3CTX6',
+  'DH2SCALE319CTX7',
+  'DH2SCALE319CTX8',
+  'DH2VLNTEC19CTX4',
+  'DH2VLNTEC19CTX5',
+  'DH2VABLSCL2SUT5',
+  'DH2VABLSCL2SUT4',
+  'DH2VABLSCL2SUT3',
+  'DH2VABLSCL2SUT2'
+)
+
+Invoke-Command -ComputerName $nodes -Credential $cred -ScriptBlock {
+  $ErrorActionPreference = 'SilentlyContinue'
+  $rbPath = 'C:\$Recycle.Bin'
+
+  Clear-RecycleBin -Force -ErrorAction SilentlyContinue
+
+  if (Test-Path -LiteralPath $rbPath) {
+    $children = Get-ChildItem -LiteralPath $rbPath -Force -ErrorAction SilentlyContinue
+    foreach ($c in $children) {
+      Remove-Item -LiteralPath $c.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+```
+
 ## Bash Wrapper (Calls PowerShell)
 ```bash
 #!/usr/bin/env bash
@@ -127,3 +164,4 @@ Invoke-Command -ComputerName \$nodes -Credential \$cred -ScriptBlock {
   `Select-Object FullName`.
 - Locked files are expected and ignored by design.
 - When the user asks for path-restricted cleanup (for example `C:\Temp` only), do not scan other temp locations.
+- Recycle-bin cleanup may leave a small number of locked/protected system entries on busy hosts.
