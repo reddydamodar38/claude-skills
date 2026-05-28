@@ -37,7 +37,7 @@ $nodes = @(
   'DH2SCALE319CTX7',
   'DH2SCALE319CTX8',
   'DH2VLNTEC19CTX4',
-  'DH2VLNTEC19CTX5',
+  'DH2VABLSCL3CTX5',
   'DH2VABLSCL2SUT5',
   'DH2VABLSCL2SUT4',
   'DH2VABLSCL2SUT3',
@@ -103,7 +103,7 @@ $nodes = @(
   'DH2SCALE319CTX7',
   'DH2SCALE319CTX8',
   'DH2VLNTEC19CTX4',
-  'DH2VLNTEC19CTX5',
+  'DH2VABLSCL3CTX5',
   'DH2VABLSCL2SUT5',
   'DH2VABLSCL2SUT4',
   'DH2VABLSCL2SUT3',
@@ -137,7 +137,7 @@ echo
 powershell -NoProfile -Command "
 \$sec  = ConvertTo-SecureString '$USER_PASS' -AsPlainText -Force
 \$cred = New-Object System.Management.Automation.PSCredential('$USER_NAME', \$sec)
-\$nodes = @('DH2VABLSCL3CTX5','DH2VABLSCL3CTX6','DH2SCALE319CTX7','DH2SCALE319CTX8','DH2VLNTEC19CTX4','DH2VLNTEC19CTX5','DH2VABLSCL2SUT5','DH2VABLSCL2SUT4','DH2VABLSCL2SUT3','DH2VABLSCL2SUT2')
+\$nodes = @('DH2VABLSCL3CTX5','DH2VABLSCL3CTX6','DH2SCALE319CTX7','DH2SCALE319CTX8','DH2VLNTEC19CTX4','DH2VABLSCL3CTX5','DH2VABLSCL2SUT5','DH2VABLSCL2SUT4','DH2VABLSCL2SUT3','DH2VABLSCL2SUT2')
 Invoke-Command -ComputerName \$nodes -Credential \$cred -ScriptBlock {
   \$ErrorActionPreference = 'SilentlyContinue'
   \$paths = @(\$env:TEMP, 'C:\Windows\Temp')
@@ -165,3 +165,4 @@ Invoke-Command -ComputerName \$nodes -Credential \$cred -ScriptBlock {
 - Locked files are expected and ignored by design.
 - When the user asks for path-restricted cleanup (for example `C:\Temp` only), do not scan other temp locations.
 - Recycle-bin cleanup may leave a small number of locked/protected system entries on busy hosts.
+
