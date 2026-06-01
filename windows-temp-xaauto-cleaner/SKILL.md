@@ -166,3 +166,14 @@ Invoke-Command -ComputerName \$nodes -Credential \$cred -ScriptBlock {
 - When the user asks for path-restricted cleanup (for example `C:\Temp` only), do not scan other temp locations.
 - Recycle-bin cleanup may leave a small number of locked/protected system entries on busy hosts.
 
+
+## XAauto UserProfile Cleanup (PowerShell)
+Use this when you need to remove unloaded XAauto user profiles.
+
+```powershell
+Get-CimInstance Win32_UserProfile |
+Where-Object {
+    $_.LocalPath -like "*XAauto*" -and $_.Loaded -eq $false
+} |
+Remove-CimInstance
+```
