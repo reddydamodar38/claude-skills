@@ -1,0 +1,7 @@
+interface:
+  display_name: "Callhome"
+  short_description: "Rotate callhome folders and restart SentinelEsm"
+  default_prompt: "Use $callhome for ablscale3 CTX nodes to rotate callhome and verify a new callhome folder."
+
+policy:
+  allow_implicit_invocation: true
