@@ -1,0 +1,7 @@
+interface:
+  display_name: "Access Logs"
+  short_description: "Collect CMB/access logs by subproject, run, and node"
+  default_prompt: "Use $access-logs to copy cmb_0373_* files from ABLCAPUTIL zip temp paths into a shared folder grouped by subproject, test run, and node."
+
+policy:
+  allow_implicit_invocation: true
