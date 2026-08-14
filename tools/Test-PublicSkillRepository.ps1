@@ -65,6 +65,9 @@ foreach ($scanRoot in $scanRoots) {
     if ($file.Extension -eq '.pyc' -or $file.Name -like 'report*.html') {
       $violations.Add("generated file: $($file.FullName)")
     }
+    if ($file.Name -match '(?i)^(?:SKILL\.md\.(?:pre-refresh|backup)-.*|.*_generated\.(?:csv|json|ya?ml)|\.restart_.*\.py|report.*_deltas\.txt)$') {
+      $violations.Add("generated or backup artifact: $($file.FullName)")
+    }
     if ($file.Name -match '(?i)^(?:auth\.json|credentials?(?:\..+)?|\.env(?:\..+)?|id_rsa|id_ed25519)$' -or
         $file.Extension -match '(?i)^\.(?:pem|pfx|key)$') {
       $violations.Add("credential file: $($file.FullName)")

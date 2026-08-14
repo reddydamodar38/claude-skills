@@ -14,6 +14,18 @@ $cleanRoot = Join-Path $fixtureRoot 'clean'
 $dirtyRoot = Join-Path $fixtureRoot 'dirty'
 $dirtyMarkdownRoot = Join-Path $fixtureRoot 'dirty-markdown'
 $workspaceArtifactRoot = Join-Path $fixtureRoot 'workspace-artifact'
+$looseArtifactCases = @(
+  @{ Name = 'skill-backup'; RelativePath = 'SKILL.md.pre-refresh-20260701' },
+  @{ Name = 'skill-backup-alias'; RelativePath = 'SKILL.md.backup-20260814' },
+  @{ Name = 'generated-parameters'; RelativePath = 'param_values_generated.csv' },
+  @{ Name = 'generated-json'; RelativePath = 'parameters_generated.json' },
+  @{ Name = 'generated-yaml'; RelativePath = 'parameters_generated.yaml' },
+  @{ Name = 'empty-generated-prefix'; RelativePath = '_generated.csv' },
+  @{ Name = 'restart-helper'; RelativePath = '.restart_batch.py' },
+  @{ Name = 'empty-restart-name'; RelativePath = '.restart_.py' },
+  @{ Name = 'generated-delta-report'; RelativePath = 'report_run_deltas.txt' },
+  @{ Name = 'empty-report-name'; RelativePath = 'report_deltas.txt' }
+)
 
 function New-TestSkill {
   param(
@@ -83,7 +95,25 @@ def submit_login(username: str, password: str) -> None:
     throw 'Expected a generated Codex work directory to be rejected.'
   }
 
-  Write-Output 'PASS: clean repositories pass and embedded credentials/generated workspaces are rejected.'
+  foreach ($case in $looseArtifactCases) {
+    $caseRoot = Join-Path $fixtureRoot $case.Name
+    New-TestSkill -RepositoryRoot $caseRoot -ScriptContent 'Password = $env:EXAMPLE_PASSWORD'
+    Set-Content -LiteralPath (Join-Path $caseRoot "codex-skills\example-skill\$($case.RelativePath)") -Encoding UTF8 -Value 'generated artifact'
+
+    $artifactRejected = $false
+    try {
+      & $validator -Root $caseRoot | Out-Null
+    }
+    catch {
+      $artifactRejected = $_.Exception.Message -match 'generated or backup artifact'
+    }
+
+    if (-not $artifactRejected) {
+      throw "Expected loose generated/backup artifact to be rejected: $($case.RelativePath)"
+    }
+  }
+
+  Write-Output 'PASS: clean repositories pass and embedded credentials/generated artifacts are rejected.'
 }
 finally {
   if (Test-Path -LiteralPath $fixtureRoot) {

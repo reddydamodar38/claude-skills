@@ -4,3 +4,7 @@
 **/.codex-gatling-batch-work/
 **/outputs/
 **/report*.html
+**/SKILL.md.pre-refresh-*
+**/*_generated.csv
+**/.restart_*.py
+**/report*_deltas.txt

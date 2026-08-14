@@ -1,3 +1,4 @@
 codex-skills/back-end-report/** whitespace=-blank-at-eof
+codex-skills/back-end-report/tests/fixtures/** text eol=lf
 codex-skills/txn-analyzer/SKILL.md whitespace=-trailing-space
 codex-skills/txn-analyzer/assets/v500_tables.txt whitespace=-trailing-space
