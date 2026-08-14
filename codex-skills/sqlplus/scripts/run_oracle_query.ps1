@@ -33,17 +33,17 @@ $ErrorActionPreference = 'Stop'
 $DbProfiles = @{
     FPABL = @{
         UserName = 'v500'
-        Password = 'CERner##_123ORA'
+        PasswordEnvironment = 'FPABL_DB_PASSWORD'
         ConnectionString = '10.37.163.164:1521/sfpabl.world'
     }
     ABLFHIR = @{
         UserName = 'v500'
-        Password = 'v500'
+        PasswordEnvironment = 'ABLFHIR_DB_PASSWORD'
         ConnectionString = '10.191.200.24:1521/sfpabl.world'
     }
     FPSG = @{
         UserName = 'v500'
-        Password = 'CERner##_123ORA'
+        PasswordEnvironment = 'FPSG_DB_PASSWORD'
         ConnectionString = '10.37.174.186:1521/sfpsg.world'
     }
 }
@@ -138,7 +138,11 @@ if (-not [string]::IsNullOrWhiteSpace($DbEnv)) {
     }
 
     if ([string]::IsNullOrWhiteSpace($Password)) {
-        $Password = $profile.Password
+        $passwordEnvironment = [string]$profile.PasswordEnvironment
+        $Password = [Environment]::GetEnvironmentVariable($passwordEnvironment, 'Process')
+        if ([string]::IsNullOrWhiteSpace($Password)) {
+            throw "Password not provided. Use -Password or set $passwordEnvironment for -DbEnv $DbEnv."
+        }
     }
 
     if ([string]::IsNullOrWhiteSpace($ConnectionString) -and [string]::IsNullOrWhiteSpace($TnsName)) {

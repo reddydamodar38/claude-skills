@@ -1,0 +1,3 @@
+database,sql_id,plan_hash,executions,elapsed_ms,cpu_ms,buffer_gets,disk_reads,rows
+ABL,abc123,777,10,1000,500,2000,20,100
+

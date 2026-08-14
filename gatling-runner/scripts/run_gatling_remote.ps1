@@ -13,19 +13,36 @@ param(
   [string]$ReplacementFrom = "MillDomain",
   [string]$ReplacementTo = "ablfhir",
   [string]$ForcedAuthority = "ablfhir",
-  [string]$ForcedConfigPassword = "c0630system",
-  [string]$ForcedScenarioDataPassword = "scale",
+  [string]$ForcedConfigPassword = $env:GATLING_CONFIG_PASSWORD,
+  [string]$ForcedScenarioDataPassword = $env:GATLING_CONFIG_PASSWORD,
+  [string]$UsernameOverride,
+  [switch]$ResolveUserIdFromDb,
+  [string]$DbEnv = "ABLFHIR",
+  [string]$SqlplusScriptPath = "C:/Users/prakash/.codex/skills/sqlplus/scripts/run_oracle_query.ps1",
   [bool]$VerboseLogging = $true,
   [int]$StartUsers = 1,
   [int]$EndUsers = 1,
   [int]$DurationSeconds = 1,
   [int]$RampDurationSeconds = 0,
   [string]$ReportOnlyOutPath,
-  [int]$ExecutionTimeoutSeconds = 7200
+  [int]$ExecutionTimeoutSeconds = 7200,
+  [ValidateSet("auto","python","powershell")]
+  [string]$ReportParserEngine = "auto"
 )
 
 $ErrorActionPreference = "Stop"
 $reportOnlyMode = -not [string]::IsNullOrWhiteSpace($ReportOnlyOutPath)
+
+if (-not $reportOnlyMode) {
+  if ([string]::IsNullOrWhiteSpace($ForcedConfigPassword) -or [string]::IsNullOrWhiteSpace($ForcedScenarioDataPassword)) {
+    throw "GATLING_CONFIG_PASSWORD must be set unless both forced password parameters are supplied."
+  }
+}
+
+# Multi-user runs are noisy by default; disable verbose logging unless explicitly requested.
+if (($StartUsers -gt 1 -or $EndUsers -gt 1) -and -not $PSBoundParameters.ContainsKey("VerboseLogging")) {
+  $VerboseLogging = $false
+}
 
 # Compatibility shim: some launcher contexts can swap these two named args.
 if (
@@ -61,9 +78,23 @@ if (-not $reportOnlyMode) {
     throw "Use only one auth mode: -KeyPath or -Password."
   }
 
-  if ($usingKey -and -not (Test-Path $KeyPath)) {
-    throw "SSH key file not found: $KeyPath"
+if ($usingKey) {
+  $keyExists = $false
+  $keyCheckError = $null
+  try {
+    $keyExists = Test-Path -LiteralPath $KeyPath -PathType Leaf -ErrorAction Stop
+  } catch {
+    $keyCheckError = $_.Exception.Message
   }
+
+  if (-not $keyExists) {
+    if (-not [string]::IsNullOrWhiteSpace($keyCheckError)) {
+      Write-Warning "Unable to pre-validate SSH key path '$KeyPath' ($keyCheckError). Proceeding and letting ssh/scp validate key access. If this run is sandboxed, re-run with elevated permissions so the process can read keys under C:/Users/prakash/.ssh."
+    } else {
+      throw "SSH key file not found: $KeyPath"
+    }
+  }
+}
 
   if (-not $usingKey) {
     if (-not (Get-Module -ListAvailable -Name Posh-SSH)) {
@@ -140,6 +171,194 @@ function Set-ScenarioDataGlobalParam {
   return $Content
 }
 
+function Get-ScenarioDataGlobalParamValue {
+  param(
+    [Parameter(Mandatory=$true)][string]$Content,
+    [Parameter(Mandatory=$true)][string]$ParamName
+  )
+
+  $mBlock = [regex]::Match($Content, '(?ms)^globalDataSets:.*?(?=^scenarioDataSets:|\z)')
+  if (-not $mBlock.Success) { return $null }
+  $block = $mBlock.Value
+
+  $pairPattern = '(?ms)-\s+name:\s*"?(?<name>[^"\r\n]+)"?\s*\r?\n\s+value:\s*"?(?<value>[^"\r\n]*)"?'
+  $matches = [regex]::Matches($block, $pairPattern)
+  foreach ($m in $matches) {
+    $name = $m.Groups["name"].Value.Trim()
+    if ($name.ToLowerInvariant() -ne $ParamName.ToLowerInvariant()) { continue }
+    return $m.Groups["value"].Value
+  }
+  return $null
+}
+
+function Find-PatternOffsets {
+  param(
+    [byte[]]$Buffer,
+    [byte[]]$Pattern
+  )
+  $hits = New-Object System.Collections.Generic.List[int]
+  if ($null -eq $Buffer -or $null -eq $Pattern) { return $hits }
+  if ($Pattern.Length -eq 0 -or $Buffer.Length -lt $Pattern.Length) { return $hits }
+  for ($i = 0; $i -le ($Buffer.Length - $Pattern.Length); $i++) {
+    $matched = $true
+    for ($j = 0; $j -lt $Pattern.Length; $j++) {
+      if ($Buffer[$i + $j] -ne $Pattern[$j]) {
+        $matched = $false
+        break
+      }
+    }
+    if ($matched) {
+      $hits.Add($i) | Out-Null
+      $i += ($Pattern.Length - 1)
+    }
+  }
+  return $hits
+}
+
+function Update-AppInfoUpdtIdPreserveBytes {
+  param(
+    [string]$AppInfoBase64,
+    [string]$OldUserId,
+    [string]$NewUserId
+  )
+
+  if ([string]::IsNullOrWhiteSpace($AppInfoBase64)) { return $AppInfoBase64 }
+  if ([string]::IsNullOrWhiteSpace($NewUserId)) { return $AppInfoBase64 }
+  if ($NewUserId -notmatch '^\d+$') {
+    Write-Warning "Skipping appinfo update because NewUserId is not numeric: $NewUserId"
+    return $AppInfoBase64
+  }
+
+  try {
+    $rawBytes = [Convert]::FromBase64String($AppInfoBase64)
+  } catch {
+    Write-Warning "Skipping appinfo update because value is not valid base64."
+    return $AppInfoBase64
+  }
+
+  $keyBytes = [System.Text.Encoding]::ASCII.GetBytes("UPDT_ID")
+  $newAscii = [System.Text.Encoding]::ASCII.GetBytes($NewUserId)
+
+  $keyHits = Find-PatternOffsets -Buffer $rawBytes -Pattern $keyBytes
+  if ($keyHits.Count -eq 0) {
+    Write-Warning "appinfo does not contain UPDT_ID key marker; keeping original appinfo unchanged."
+    return $AppInfoBase64
+  }
+
+  $lastKeyPos = $keyHits[$keyHits.Count - 1]
+  $replaceAt = -1
+  $replaceLen = -1
+
+  # Preferred path: replace explicit old user id bytes after UPDT_ID marker.
+  if (-not [string]::IsNullOrWhiteSpace($OldUserId) -and $OldUserId -match '^\d+$') {
+    $oldAscii = [System.Text.Encoding]::ASCII.GetBytes($OldUserId)
+    $idHits = Find-PatternOffsets -Buffer $rawBytes -Pattern $oldAscii
+    foreach ($hit in $idHits) {
+      if ($hit -gt $lastKeyPos) {
+        $replaceAt = $hit
+        $replaceLen = $oldAscii.Length
+        break
+      }
+    }
+  }
+
+  # Fallback: scan for digit runs after UPDT_ID marker and prefer same-length as NewUserId.
+  if ($replaceAt -lt 0) {
+    $windowStart = [Math]::Min($lastKeyPos + $keyBytes.Length, $rawBytes.Length)
+    $windowEnd = $rawBytes.Length - 1
+    $candidateAnyStart = -1
+    $candidateAnyLen = -1
+    $candidateSameLenStart = -1
+    $candidateSameLenLen = -1
+    $runStart = -1
+    $runLen = 0
+    for ($i = $windowStart; $i -le $windowEnd; $i++) {
+      $b = $rawBytes[$i]
+      $isDigit = ($b -ge 48 -and $b -le 57)
+      if ($isDigit) {
+        if ($runStart -lt 0) { $runStart = $i; $runLen = 1 } else { $runLen++ }
+      } else {
+        if ($runStart -ge 0 -and $runLen -ge 6 -and $runLen -le 20) {
+          if ($candidateAnyStart -lt 0) { $candidateAnyStart = $runStart; $candidateAnyLen = $runLen }
+          if ($runLen -eq $newAscii.Length -and $candidateSameLenStart -lt 0) {
+            $candidateSameLenStart = $runStart
+            $candidateSameLenLen = $runLen
+          }
+        }
+        $runStart = -1; $runLen = 0
+      }
+    }
+    if ($runStart -ge 0 -and $runLen -ge 6 -and $runLen -le 20) {
+      if ($candidateAnyStart -lt 0) { $candidateAnyStart = $runStart; $candidateAnyLen = $runLen }
+      if ($runLen -eq $newAscii.Length -and $candidateSameLenStart -lt 0) {
+        $candidateSameLenStart = $runStart
+        $candidateSameLenLen = $runLen
+      }
+    }
+
+    if ($candidateSameLenStart -ge 0) {
+      $replaceAt = $candidateSameLenStart
+      $replaceLen = $candidateSameLenLen
+    } elseif ($candidateAnyStart -ge 0) {
+      $replaceAt = $candidateAnyStart
+      $replaceLen = $candidateAnyLen
+    }
+  }
+  if ($replaceAt -lt 0 -or $replaceLen -le 0) {
+    Write-Warning "No UPDT_ID numeric byte segment found in appinfo; keeping original appinfo bytes unchanged."
+    return $AppInfoBase64
+  }
+
+  if ($replaceLen -ne $newAscii.Length) {
+    Write-Warning "Skipping appinfo UPDT_ID byte-preserving update because encoded id length differs (existing=$replaceLen, new=$($newAscii.Length))."
+    return $AppInfoBase64
+  }
+
+  $changed = $false
+  for ($i = 0; $i -lt $newAscii.Length; $i++) {
+    if ($rawBytes[$replaceAt + $i] -ne $newAscii[$i]) {
+      $rawBytes[$replaceAt + $i] = $newAscii[$i]
+      $changed = $true
+    }
+  }
+
+  if (-not $changed) {
+    return $AppInfoBase64
+  }
+
+  return [Convert]::ToBase64String($rawBytes)
+}
+function Get-DbUserIdByUsername {
+  param(
+    [Parameter(Mandatory=$true)][string]$Username,
+    [Parameter(Mandatory=$true)][string]$DbEnvironment,
+    [Parameter(Mandatory=$true)][string]$SqlScriptPath
+  )
+
+  if (-not (Test-Path -LiteralPath $SqlScriptPath -PathType Leaf)) {
+    throw "SQL helper script not found: $SqlScriptPath"
+  }
+
+  $query = "SELECT person_id AS user_id FROM PRSNL p WHERE UPPER(username)=UPPER('$Username')"
+  $output = & $PSHOME/pwsh.exe -NoProfile -File $SqlScriptPath -DbEnv $DbEnvironment -Query $query -OutputFormat csv 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    $joined = ($output | ForEach-Object { [string]$_ }) -join "`n"
+    throw "Failed user_id lookup for '$Username' in '$DbEnvironment'.`n$joined"
+  }
+
+  $lines = @($output | ForEach-Object { ([string]$_).Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  $valueLine = $lines | Where-Object { $_ -notmatch '^"?USER_ID"?$' } | Select-Object -First 1
+  if ([string]::IsNullOrWhiteSpace($valueLine)) {
+    throw "No user_id returned from DB for username '$Username' in '$DbEnvironment'."
+  }
+
+  $userId = ($valueLine -replace '"', '').Trim()
+  if ($userId -notmatch '^\d+$') {
+    throw "Unexpected user_id format from DB for username '$Username': $userId"
+  }
+  return $userId
+}
+
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gatling-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
@@ -185,6 +404,27 @@ try {
     $scenarioContent | Set-Content -Path $tempScenario -Encoding UTF8
 
     $scenarioDataContent = (Get-Content -Path $scenarioDataPath -Raw).Replace($ReplacementFrom, $ReplacementTo)
+    $originalUserId = Get-ScenarioDataGlobalParamValue -Content $scenarioDataContent -ParamName "user_id"
+    if (-not [string]::IsNullOrWhiteSpace($UsernameOverride)) {
+      $scenarioDataContent = Set-ScenarioDataGlobalParam -Content $scenarioDataContent -ParamName "username" -ParamValue $UsernameOverride
+      $shouldResolveUserId = $ResolveUserIdFromDb.IsPresent
+      if (-not $PSBoundParameters.ContainsKey("ResolveUserIdFromDb")) {
+        $shouldResolveUserId = $true
+      }
+      if ($shouldResolveUserId) {
+        $resolvedUserId = Get-DbUserIdByUsername -Username $UsernameOverride -DbEnvironment $DbEnv -SqlScriptPath $SqlplusScriptPath
+        Write-Host "Resolved user_id=$resolvedUserId for username '$UsernameOverride' from DB env '$DbEnv'."
+        $scenarioDataContent = Set-ScenarioDataGlobalParam -Content $scenarioDataContent -ParamName "user_id" -ParamValue $resolvedUserId
+        $existingAppInfo = Get-ScenarioDataGlobalParamValue -Content $scenarioDataContent -ParamName "appinfo"
+        if (-not [string]::IsNullOrWhiteSpace($existingAppInfo)) {
+          $updatedAppInfo = Update-AppInfoUpdtIdPreserveBytes -AppInfoBase64 $existingAppInfo -OldUserId $originalUserId -NewUserId $resolvedUserId
+          if ($updatedAppInfo -ne $existingAppInfo) {
+            $scenarioDataContent = Set-ScenarioDataGlobalParam -Content $scenarioDataContent -ParamName "appinfo" -ParamValue $updatedAppInfo
+            Write-Host "Updated appinfo UPDT_ID bytes to match resolved user_id."
+          }
+        }
+      }
+    }
     $scenarioDataContent = Set-ScenarioDataGlobalParam -Content $scenarioDataContent -ParamName "authority" -ParamValue $ForcedAuthority
     $scenarioDataContent = Set-ScenarioDataGlobalParam -Content $scenarioDataContent -ParamName "password" -ParamValue $ForcedScenarioDataPassword
     $scenarioDataContent | Set-Content -Path $tempScenarioData -Encoding UTF8
@@ -202,20 +442,20 @@ try {
     }
 
     if ($usingKey) {
-    $sshCommon = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-i", $KeyPath)
-    $scpCommon = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-i", $KeyPath)
+    $sshCommon = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-i", $KeyPath)
+    $scpCommon = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-i", $KeyPath)
     $target = "$UserName@$HostName"
 
     $prepareCmd = "set -e; rm -rf '$remoteRunDir'; mkdir -p '$remoteRunDir'; mkdir -p '$RemoteBaseDir/$RemoteReportDirName'; rm -f '$remoteOutFile'"
     & ssh @sshCommon $target $prepareCmd
-    if ($LASTEXITCODE -ne 0) { throw "Remote prepare step failed (key auth)." }
+    if ($LASTEXITCODE -ne 0) { throw "Remote prepare step failed (key auth). Ensure SSH key '$KeyPath' is readable by this process. If running in a sandboxed session, re-run with elevated permissions." }
 
     & scp @scpCommon $localUploadArchive "$target`:$remoteUploadArchive"
     if ($LASTEXITCODE -ne 0) { throw "SCP upload failed for staged input archive." }
     & ssh @sshCommon $target "set -e; tar -xzf '$remoteUploadArchive' -C '$remoteRunDir'; rm -f '$remoteUploadArchive'"
     if ($LASTEXITCODE -ne 0) { throw "Remote extract failed for staged input archive." }
 
-    $runCmd = "cd '$RemoteBaseDir' && bash -lc 'set -o pipefail; java -jar gatling-crank-executor.jar ./$remoteTempDirName ./$RemoteReportDirName false 0 2>&1 | tee gatling.$remoteTempDirName.out; exit `${PIPESTATUS[0]}'"
+    $runCmd = "cd '$RemoteBaseDir' && bash --noprofile --norc -c 'set -o pipefail; java -jar gatling-crank-executor.jar --data-directory ./$remoteTempDirName --report-directory ./$RemoteReportDirName --no-reports false --metrics-interval 0 2>&1 | tee gatling.$remoteTempDirName.out; exit `${PIPESTATUS[0]}'"
     Write-Host "Streaming remote Gatling console output..."
     & ssh @sshCommon $target $runCmd 2>&1 | ForEach-Object {
       if ($null -eq $_) { return }
@@ -255,7 +495,7 @@ try {
         throw "Remote extract step failed: $($extractResult.Error -join ' | ')"
       }
 
-      $runCmd = "cd '$RemoteBaseDir' && java -jar gatling-crank-executor.jar ./$remoteTempDirName ./$RemoteReportDirName false 0 > gatling.$remoteTempDirName.out 2>&1"
+      $runCmd = "cd '$RemoteBaseDir' && java -jar gatling-crank-executor.jar --data-directory ./$remoteTempDirName --report-directory ./$RemoteReportDirName --no-reports false --metrics-interval 0 > gatling.$remoteTempDirName.out 2>&1"
       $runResult = Invoke-SSHCommand -SessionId $session.SessionId -Command $runCmd -TimeOut ($ExecutionTimeoutSeconds * 1000)
       if ($runResult.Output) {
         foreach ($line in $runResult.Output) {
@@ -297,6 +537,25 @@ try {
   function Escape-Html {
     param([string]$Value)
     return [System.Net.WebUtility]::HtmlEncode([string]$Value)
+  }
+
+  function Get-ResponseStatusFromJsonText {
+    param([string]$JsonText)
+    if ([string]::IsNullOrWhiteSpace($JsonText)) { return "" }
+
+    try {
+      $obj = $JsonText | ConvertFrom-Json -ErrorAction Stop
+      if ($null -ne $obj -and $obj.PSObject.Properties.Name -contains 'status') {
+        return [string]$obj.status
+      }
+    } catch {}
+
+    $m = [regex]::Match($JsonText, '(?is)"status"\s*:\s*("(?<s>[^"]*)"|(?<n>-?\d+))')
+    if ($m.Success) {
+      if (-not [string]::IsNullOrWhiteSpace($m.Groups['s'].Value)) { return [string]$m.Groups['s'].Value }
+      if (-not [string]::IsNullOrWhiteSpace($m.Groups['n'].Value)) { return [string]$m.Groups['n'].Value }
+    }
+    return ""
   }
 
   function Truncate-Text {
@@ -450,7 +709,8 @@ try {
       $obj = $jsonOnly | ConvertFrom-Json -ErrorAction Stop
       return ($obj | ConvertTo-Json -Depth 100)
     } catch {
-      return $null
+      # Keep complete JSON object even when strict parsing fails for oversized/wrapped payloads.
+      return $jsonOnly
     }
   }
 
@@ -509,7 +769,43 @@ try {
       }
     }
 
+    # Fallback for wrapped/oversized log payloads: capture until next timestamped log line.
+    $boundaryBlock = Try-JsonBlockUntilLogBoundary -AllLines $AllLines -StartIndex $StartIndex -MaxLookaheadLines $MaxLookaheadLines
+    if (-not [string]::IsNullOrWhiteSpace($boundaryBlock)) {
+      $fromBoundary = Try-PrettyJson -Text $boundaryBlock
+      if (-not [string]::IsNullOrWhiteSpace($fromBoundary)) { return $fromBoundary }
+      return $boundaryBlock
+    }
+
     return $null
+  }
+
+  function Try-JsonBlockUntilLogBoundary {
+    param(
+      [string[]]$AllLines,
+      [int]$StartIndex,
+      [int]$MaxLookaheadLines = 1200
+    )
+
+    if ($StartIndex -lt 0 -or $StartIndex -ge $AllLines.Count) { return $null }
+    $firstLine = $AllLines[$StartIndex]
+    $start = $firstLine.IndexOf('{')
+    if ($start -lt 0) { return $null }
+
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.AppendLine($firstLine.Substring($start))
+    $last = [Math]::Min($AllLines.Count - 1, $StartIndex + $MaxLookaheadLines)
+    for ($i = $StartIndex + 1; $i -le $last; $i++) {
+      $ln = $AllLines[$i]
+      if ($ln -match '^\d{2}:\d{2}:\d{2}\.\d{3}\s+\[') { break }
+      [void]$builder.AppendLine($ln)
+    }
+
+    $joined = $builder.ToString().Trim()
+    if ([string]::IsNullOrWhiteSpace($joined)) { return $null }
+    $jsonOnly = Extract-JsonObjectFromString -Text $joined
+    if (-not [string]::IsNullOrWhiteSpace($jsonOnly)) { return $jsonOnly }
+    return $joined
   }
 
   function Remove-CommonIndent {
@@ -541,6 +837,8 @@ try {
     if ([string]::IsNullOrWhiteSpace($ReplyBody)) { return "Unknown" }
 
     if ($ReplyBody -match '(?i)"success_ind"\s*:\s*"?0"?' -or
+        $ReplyBody -match '(?i)"successindicator"\s*:\s*"?0"?' -or
+        $ReplyBody -match '(?i)"successIndicator"\s*:\s*"?0"?' -or
         $ReplyBody -match '(?i)"status"\s*:\s*"(F|0)"' -or
         $ReplyBody -match '(?i)"operationstatus"\s*:\s*"F"' -or
         $ReplyBody -match '(?i)"status_data"\s*:\s*\{[\s\S]*?"status"\s*:\s*"F"') {
@@ -548,6 +846,8 @@ try {
     }
 
     if ($ReplyBody -match '(?i)"success_ind"\s*:\s*"?1"?' -or
+        $ReplyBody -match '(?i)"successindicator"\s*:\s*"?1"?' -or
+        $ReplyBody -match '(?i)"successIndicator"\s*:\s*"?1"?' -or
         $ReplyBody -match '(?i)"status"\s*:\s*"(S|Z|1)"' -or
         $ReplyBody -match '(?i)"operationstatus"\s*:\s*"S"') {
       return "Success in replies.yaml"
@@ -603,6 +903,68 @@ try {
         $map[$txName] = [PSCustomObject]@{
           Status = Get-RepliesYamlStatusFromBody -ReplyBody $bodyRaw
           Body = $bodyPretty
+          FileName = [System.IO.Path]::GetFileName($filePath)
+          SourcePath = $filePath
+        }
+      }
+    }
+
+    return $map
+  }
+
+  function Parse-RepliesYamlTransactionStatuses {
+    param([string[]]$RepliesYamlPaths)
+
+    $map = @{}
+    if ($null -eq $RepliesYamlPaths -or $RepliesYamlPaths.Count -eq 0) { return $map }
+
+    foreach ($filePath in $RepliesYamlPaths) {
+      if ([string]::IsNullOrWhiteSpace($filePath) -or -not (Test-Path $filePath)) { continue }
+      $reader = [System.IO.StreamReader]::new($filePath)
+      $txName = $null
+      $sawFailure = $false
+      $sawSuccess = $false
+      try {
+        while (($line = $reader.ReadLine()) -ne $null) {
+          $txMatch = [regex]::Match($line, '^\s*-\s*transName:\s*"([^"]+)"')
+          if ($txMatch.Success) {
+            if (-not [string]::IsNullOrWhiteSpace($txName) -and -not $map.ContainsKey($txName)) {
+              $status = if ($sawFailure) { "Failure in replies.yaml" } elseif ($sawSuccess) { "Success in replies.yaml" } else { "Unknown in replies.yaml" }
+              $map[$txName] = [PSCustomObject]@{
+                Status = $status
+                Body = ""
+                FileName = [System.IO.Path]::GetFileName($filePath)
+                SourcePath = $filePath
+              }
+            }
+            $txName = $txMatch.Groups[1].Value.Trim()
+            $sawFailure = $false
+            $sawSuccess = $false
+            continue
+          }
+
+          if ([string]::IsNullOrWhiteSpace($txName)) { continue }
+          if ($line -match '(?i)"success_ind"\s*:\s*"?0"?' -or
+              $line -match '(?i)"successindicator"\s*:\s*"?0"?' -or
+              $line -match '(?i)"status"\s*:\s*"(F|0)"' -or
+              $line -match '(?i)"operationstatus"\s*:\s*"F"') {
+            $sawFailure = $true
+          } elseif ($line -match '(?i)"success_ind"\s*:\s*"?1"?' -or
+                    $line -match '(?i)"successindicator"\s*:\s*"?1"?' -or
+                    $line -match '(?i)"status"\s*:\s*"(S|Z|1)"' -or
+                    $line -match '(?i)"operationstatus"\s*:\s*"S"') {
+            $sawSuccess = $true
+          }
+        }
+      } finally {
+        $reader.Dispose()
+      }
+
+      if (-not [string]::IsNullOrWhiteSpace($txName) -and -not $map.ContainsKey($txName)) {
+        $status = if ($sawFailure) { "Failure in replies.yaml" } elseif ($sawSuccess) { "Success in replies.yaml" } else { "Unknown in replies.yaml" }
+        $map[$txName] = [PSCustomObject]@{
+          Status = $status
+          Body = ""
           FileName = [System.IO.Path]::GetFileName($filePath)
           SourcePath = $filePath
         }
@@ -975,6 +1337,153 @@ try {
     return $null
   }
 
+  function Get-RequestNameFromJson {
+    param([string]$JsonText)
+    if ([string]::IsNullOrWhiteSpace($JsonText)) { return $null }
+    if ($JsonText -match '(?i)"requestName"\s*:\s*"([^"]+)"') { return $Matches[1] }
+    return $null
+  }
+
+  function Build-GlobalJsonIndexes {
+    param([string[]]$AllLines)
+
+    $requestsByTransaction = @{}
+    $responsesByRequestName = @{}
+    $responseCandidates = New-Object System.Collections.Generic.List[object]
+    $recentReplacements = New-Object System.Collections.Generic.List[object]
+    $replacementPattern = '(?i)\[(\d+)\]\s+\[([^\]]+)\]\s+replacing\s+\$\{'
+
+    for ($i = 0; $i -lt $AllLines.Count; $i++) {
+      $line = $AllLines[$i]
+
+      if ($line -match $replacementPattern) {
+        $recentReplacements.Add([PSCustomObject]@{
+          Line = $i + 1
+          Transaction = [string]$Matches[2]
+        }) | Out-Null
+        if ($recentReplacements.Count -gt 20000) {
+          $recentReplacements.RemoveRange(0, 10000)
+        }
+      }
+
+      if ($line -match '(?i)final body:\s*\{') {
+        $pretty = Try-PrettyJsonFromLineRange -AllLines $AllLines -StartIndex $i
+        if (-not [string]::IsNullOrWhiteSpace($pretty)) {
+          $reqName = Get-RequestNameFromJson -JsonText $pretty
+          $tx = $null
+          for ($r = $recentReplacements.Count - 1; $r -ge 0; $r--) {
+            if ([int]$recentReplacements[$r].Line -le ($i + 1)) {
+              $tx = [string]$recentReplacements[$r].Transaction
+              break
+            }
+          }
+          if (-not [string]::IsNullOrWhiteSpace($tx)) {
+            if (-not $requestsByTransaction.ContainsKey($tx)) {
+              $requestsByTransaction[$tx] = New-Object System.Collections.Generic.List[object]
+            }
+            $requestsByTransaction[$tx].Add([PSCustomObject]@{
+              Line = $i + 1
+              Json = $pretty
+              RequestName = if ([string]::IsNullOrWhiteSpace($reqName)) { "" } else { [string]$reqName }
+            }) | Out-Null
+          }
+        }
+      }
+
+      $payload = $null
+      if ($line -match '(?i)Request failed, reply body:\s*(.+)$') {
+        $payload = $Matches[1]
+      } elseif ($line -match '(?i)Dumping body of reply for\s+.+?:\s*(.+)$') {
+        $payload = $Matches[1]
+      } elseif ($line -match '(?i)\breply body\b\s*[:=-]\s*(.+)$') {
+        $payload = $Matches[1]
+      } elseif ($line -match '(?i)SimulationProcessor\s*-\s*Body:\s*(\{.+)$') {
+        $payload = $Matches[1]
+      }
+
+      if (-not [string]::IsNullOrWhiteSpace($payload)) {
+        $prettyResp = Try-PrettyJson -Text $payload
+        if ([string]::IsNullOrWhiteSpace($prettyResp)) {
+          $prettyResp = Try-PrettyJsonFromLineRange -AllLines $AllLines -StartIndex $i
+        }
+        if (-not [string]::IsNullOrWhiteSpace($prettyResp)) {
+          $respReqName = Get-RequestNameFromJson -JsonText $prettyResp
+          if (-not [string]::IsNullOrWhiteSpace($respReqName)) {
+            $key = $respReqName.ToLowerInvariant()
+            if (-not $responsesByRequestName.ContainsKey($key)) {
+              $responsesByRequestName[$key] = New-Object System.Collections.Generic.List[object]
+            }
+            $respCandidate = [PSCustomObject]@{
+              Line = $i + 1
+              Json = $prettyResp
+              RequestName = [string]$respReqName
+            }
+            $responsesByRequestName[$key].Add($respCandidate) | Out-Null
+            $responseCandidates.Add($respCandidate) | Out-Null
+          } else {
+            $responseCandidates.Add([PSCustomObject]@{
+              Line = $i + 1
+              Json = $prettyResp
+              RequestName = ""
+            }) | Out-Null
+          }
+        }
+      }
+    }
+
+    return [PSCustomObject]@{
+      RequestsByTransaction = $requestsByTransaction
+      ResponsesByRequestName = $responsesByRequestName
+      ResponseCandidates = $responseCandidates
+    }
+  }
+
+  function Invoke-PythonFastReportParser {
+    param(
+      [string]$OutPath,
+      [string]$ScenarioDirectory,
+      [string]$TempDirectory
+    )
+
+    $pyScript = Join-Path $PSScriptRoot "report_parser_fast.py"
+    if (-not (Test-Path -LiteralPath $pyScript -PathType Leaf)) {
+      throw "Python report parser not found: $pyScript"
+    }
+
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $pythonCmd) {
+      throw "python is not available in PATH for fast report parser."
+    }
+
+    $outFileObj = Get-Item -LiteralPath $OutPath -ErrorAction Stop
+    $cachePath = [string]($OutPath + ".report-index.json")
+    $outputJsonPath = Join-Path $TempDirectory ("report-fast-data-" + [guid]::NewGuid().ToString("N") + ".json")
+
+    $pyArgs = @(
+      $pyScript,
+      "--out-path", [string]$outFileObj.FullName,
+      "--scenario-dir", [string]$ScenarioDirectory,
+      "--output-json", [string]$outputJsonPath,
+      "--cache-path", [string]$cachePath
+    )
+
+    $pyOutput = & python @pyArgs 2>&1
+    foreach ($ln in @($pyOutput)) {
+      if ($null -eq $ln) { continue }
+      $txt = [string]$ln
+      if ([string]::IsNullOrWhiteSpace($txt)) { continue }
+      Write-Host $txt
+    }
+    if ($LASTEXITCODE -ne 0) {
+      throw "Python fast report parser exited with code $LASTEXITCODE"
+    }
+    if (-not (Test-Path -LiteralPath $outputJsonPath -PathType Leaf)) {
+      throw "Python fast report parser did not produce dataset JSON: $outputJsonPath"
+    }
+
+    return $outputJsonPath
+  }
+
   $summaryRows = New-Object System.Collections.Generic.List[object]
   $summaryKeySet = New-Object 'System.Collections.Generic.HashSet[string]'
   $allTransactionNames = New-Object 'System.Collections.Generic.HashSet[string]'
@@ -1046,6 +1555,104 @@ try {
     return "Review request/response and failure trace for this transaction; start with requestName/status_data and validate prerequisite transaction outputs."
   }
 
+  $pythonParsed = $false
+  $orderedTransactions = New-Object System.Collections.Generic.List[string]
+  $anchorByTransaction = @{}
+  $detailsByTransaction = @{}
+  $repliesYamlPaths = @()
+  $repliesYamlPathDisplay = "Not found"
+  $generatedAt = ""
+  $totalTransactions = 0
+
+  if ($ReportParserEngine -ne "powershell") {
+    try {
+      $datasetPath = Invoke-PythonFastReportParser -OutPath $localOutPath -ScenarioDirectory $scenarioDir -TempDirectory $tempRoot
+      $datasetRaw = [System.IO.File]::ReadAllText($datasetPath)
+      $dataset = $datasetRaw | ConvertFrom-Json -Depth 100
+
+      $summaryRows.Clear()
+      foreach ($row in @($dataset.summaryRows)) {
+        $summaryRows.Add([PSCustomObject]@{
+          Transaction = [string]$row.Transaction
+          Outcome = [string]$row.Outcome
+          Source = [string]$row.Source
+        }) | Out-Null
+      }
+
+      foreach ($tx in @($dataset.allTransactionNames)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$tx)) {
+          [void]$allTransactionNames.Add([string]$tx)
+        }
+      }
+
+      foreach ($tx in @($dataset.orderedTransactions)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$tx)) {
+          $orderedTransactions.Add([string]$tx) | Out-Null
+        }
+      }
+
+      if ($dataset.anchorByTransaction) {
+        foreach ($prop in $dataset.anchorByTransaction.PSObject.Properties) {
+          $anchorByTransaction[[string]$prop.Name] = [string]$prop.Value
+        }
+      }
+
+      if ($dataset.detailsByTransaction) {
+        foreach ($prop in $dataset.detailsByTransaction.PSObject.Properties) {
+          $d = $prop.Value
+          $rangeBlocks = @()
+          foreach ($rb in @($d.RangeBlocks)) {
+            $rangeBlocks += [PSCustomObject]@{
+              StartLine = $rb.StartLine
+              EndLine = $rb.EndLine
+              Text = [string]$rb.Text
+              Title = [string]$rb.Title
+            }
+          }
+
+          $detailsByTransaction[[string]$prop.Name] = [PSCustomObject]@{
+            MatchedLines = @($d.MatchedLines)
+            RangeBlocks = $rangeBlocks
+            RequestJson = @($d.RequestJson)
+            ResponseJson = @($d.ResponseJson)
+            RequestLine = $d.RequestLine
+            ResponseLine = $d.ResponseLine
+            WindowStartLine = $d.WindowStartLine
+            WindowEndLine = $d.WindowEndLine
+            Recommendation = [string]$d.Recommendation
+            RepliesYamlState = [string]$d.RepliesYamlState
+            RepliesYamlFileName = [string]$d.RepliesYamlFileName
+            RepliesYamlBody = [string]$d.RepliesYamlBody
+            MissingTokenExpression = [string]$d.MissingTokenExpression
+            MissingTokenErrorLine = $d.MissingTokenErrorLine
+            DependencySourceTransaction = [string]$d.DependencySourceTransaction
+            DependencyRequestJson = [string]$d.DependencyRequestJson
+            DependencyRequestLine = $d.DependencyRequestLine
+            DependencyResponseJson = [string]$d.DependencyResponseJson
+            DependencyResponseLine = $d.DependencyResponseLine
+            DependencyRepliesYamlState = [string]$d.DependencyRepliesYamlState
+            DependencyRepliesYamlFileName = [string]$d.DependencyRepliesYamlFileName
+            DependencyRepliesYamlBody = [string]$d.DependencyRepliesYamlBody
+            DependencyTokenPathInReplies = [string]$d.DependencyTokenPathInReplies
+            DependencyTokenValueFromReplies = [string]$d.DependencyTokenValueFromReplies
+          }
+        }
+      }
+
+      $repliesYamlPathDisplay = [string]$dataset.repliesYamlPathDisplay
+      $totalTransactions = $allTransactionNames.Count
+      $generatedAt = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz")
+      $pythonParsed = $true
+      Write-Host "Using python fast report parser backend (with cache support)."
+    } catch {
+      if ($ReportParserEngine -eq "python") {
+        throw
+      }
+      Write-Warning "Python fast report parser unavailable/failed. Falling back to PowerShell parser. Details: $($_.Exception.Message)"
+    }
+  }
+
+  if (-not $pythonParsed) {
   # 1) KO list from request summary lines: > TxName (OK=.. KO=..)
   $inRequestsSection = $false
   foreach ($line in $reportLines) {
@@ -1166,8 +1773,21 @@ try {
   $escapedScenario = Escape-Html $ScenarioName
   $escapedHost = Escape-Html $HostName
   $escapedRawLogPath = Escape-Html $localRawCopyPath
+  $largeLogSummaryMode = (-not $pythonParsed -and $lines.Count -gt 200000)
   $repliesYamlPaths = Resolve-RepliesYamlPaths -ScenarioDirectory $scenarioDir
-  $repliesYamlMap = Parse-RepliesYamlTransactions -RepliesYamlPaths $repliesYamlPaths
+  $repliesYamlMap = if ($largeLogSummaryMode) {
+    Parse-RepliesYamlTransactionStatuses -RepliesYamlPaths $repliesYamlPaths
+  } else {
+    Parse-RepliesYamlTransactions -RepliesYamlPaths $repliesYamlPaths
+  }
+  foreach ($txName in $repliesYamlMap.Keys) {
+    $entry = $repliesYamlMap[$txName]
+    $state = if ($null -ne $entry) { [string]$entry.Status } else { "" }
+    if ($state -ne "Failure in replies.yaml" -and $state -ne "Unknown in replies.yaml") { continue }
+    $already = $summaryRows | Where-Object { $_.Transaction -eq $txName } | Select-Object -First 1
+    if ($null -ne $already) { continue }
+    Add-SummaryRow -Rows $summaryRows -KeySet $summaryKeySet -Transaction $txName -Outcome "replies.yaml status only" -Source "REPLIES"
+  }
   $repliesYamlPathDisplay = if ($repliesYamlPaths.Count -gt 0) { ($repliesYamlPaths -join "; ") } else { "Not found" }
   $escapedRepliesYamlPath = Escape-Html $repliesYamlPathDisplay
   $generatedAt = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz")
@@ -1204,6 +1824,55 @@ try {
 
   # Gather detail evidence per transaction with line-numbered blocks.
   $detailsByTransaction = @{}
+  if ($largeLogSummaryMode) {
+    Write-Warning "Large output detected ($($lines.Count) lines). Using bounded summary mode for the PowerShell report parser."
+    foreach ($tx in $orderedTransactions) {
+      $txRowsForRecommendation = @($summaryRows | Where-Object { $_.Transaction -eq $tx })
+      $emptyDetailForRecommendation = [PSCustomObject]@{
+        MatchedLines = @()
+        ResponseJson = @()
+      }
+      $recommendation = Get-TransactionRecommendation -TransactionRows $txRowsForRecommendation -Detail $emptyDetailForRecommendation
+
+      $repliesState = "Not found in replies*.yaml"
+      $repliesFileName = ""
+      $repliesEntry = Resolve-RepliesEntryForTransaction -RepliesMap $repliesYamlMap -Transaction $tx
+      if ($repliesEntry -ne $null) {
+        $repliesState = [string]$repliesEntry.Status
+        $repliesFileName = [string]$repliesEntry.FileName
+      }
+
+      $detailsByTransaction[$tx] = [PSCustomObject]@{
+        MatchedLines = @()
+        RangeBlocks = @()
+        RequestJson = @()
+        ResponseJson = @()
+        RequestLine = $null
+        ResponseLine = $null
+        WindowStartLine = $null
+        WindowEndLine = $null
+        Recommendation = $recommendation
+        RepliesYamlState = $repliesState
+        RepliesYamlFileName = $repliesFileName
+        RepliesYamlBody = ""
+        MissingTokenExpression = ""
+        MissingTokenErrorLine = $null
+        DependencySourceTransaction = ""
+        DependencyRequestJson = ""
+        DependencyRequestLine = $null
+        DependencyResponseJson = ""
+        DependencyResponseLine = $null
+        DependencyRepliesYamlState = "Not found in replies*.yaml"
+        DependencyRepliesYamlFileName = ""
+        DependencyRepliesYamlBody = ""
+        DependencyTokenPathInReplies = ""
+        DependencyTokenValueFromReplies = ""
+      }
+    }
+  } else {
+  $globalJsonIndex = Build-GlobalJsonIndexes -AllLines $lines
+  $usedRequestLines = New-Object 'System.Collections.Generic.HashSet[int]'
+  $usedResponseLines = New-Object 'System.Collections.Generic.HashSet[int]'
   foreach ($tx in $orderedTransactions) {
     $matchedLineSet = New-Object 'System.Collections.Generic.HashSet[string]'
     $hitIndexes = New-Object System.Collections.Generic.List[int]
@@ -1272,6 +1941,85 @@ try {
     if ($anchoredResponse -ne $null) {
       $responseJsonSet.Clear()
       $null = $responseJsonSet.Add($anchoredResponse.Json)
+    }
+
+    # Prevent duplicate request assignment across multiple transactions.
+    if ($anchoredRequest -ne $null -and $usedRequestLines.Contains([int]$anchoredRequest.Line)) {
+      $anchoredRequest = $null
+      $requestJsonSet.Clear()
+      $expectedReqName = $null
+    }
+
+    # Global fallback for request JSON by exact transaction.
+    if ($anchoredRequest -eq $null -and $globalJsonIndex.RequestsByTransaction.ContainsKey($tx)) {
+      $reqCandidates = $globalJsonIndex.RequestsByTransaction[$tx]
+      foreach ($candReq in $reqCandidates) {
+        $candLine = [int]$candReq.Line
+        if ($usedRequestLines.Contains($candLine)) { continue }
+        $anchoredRequest = [PSCustomObject]@{
+          Line = $candLine
+          Json = [string]$candReq.Json
+        }
+        $requestJsonSet.Clear()
+        $null = $requestJsonSet.Add($anchoredRequest.Json)
+        $expectedReqName = if (-not [string]::IsNullOrWhiteSpace([string]$candReq.RequestName)) { [string]$candReq.RequestName } elseif ($anchoredRequest.Json -match '(?i)"requestName"\s*:\s*"([^"]+)"') { $Matches[1] } else { $null }
+        break
+      }
+    }
+
+    if ($anchoredRequest -ne $null) {
+      $null = $usedRequestLines.Add([int]$anchoredRequest.Line)
+      if ([string]::IsNullOrWhiteSpace($expectedReqName) -and $anchoredRequest.Json -match '(?i)"requestName"\s*:\s*"([^"]+)"') {
+        $expectedReqName = $Matches[1]
+      }
+    }
+
+    # Prevent duplicate response assignment across multiple transactions.
+    if ($anchoredResponse -ne $null -and $usedResponseLines.Contains([int]$anchoredResponse.Line)) {
+      $anchoredResponse = $null
+      $responseJsonSet.Clear()
+    }
+
+    # Global fallback for response JSON by requestName, searching forward from selected request line.
+    if ($anchoredResponse -eq $null -and -not [string]::IsNullOrWhiteSpace($expectedReqName)) {
+      $reqKey = $expectedReqName.ToLowerInvariant()
+      if ($globalJsonIndex.ResponsesByRequestName.ContainsKey($reqKey)) {
+        $reqLineFloor = if ($anchoredRequest -ne $null) { [int]$anchoredRequest.Line } else { 0 }
+        $respCandidates = $globalJsonIndex.ResponsesByRequestName[$reqKey]
+        foreach ($candResp in $respCandidates) {
+          $candRespLine = [int]$candResp.Line
+          if ($candRespLine -lt $reqLineFloor) { continue }
+          if ($usedResponseLines.Contains($candRespLine)) { continue }
+          $anchoredResponse = [PSCustomObject]@{
+            Line = $candRespLine
+            Json = [string]$candResp.Json
+          }
+          $responseJsonSet.Clear()
+          $null = $responseJsonSet.Add($anchoredResponse.Json)
+          break
+        }
+      }
+    }
+
+    # Last fallback: first unmatched response block after request line, even without requestName correlation.
+    if ($anchoredResponse -eq $null) {
+      $reqLineFloor = if ($anchoredRequest -ne $null) { [int]$anchoredRequest.Line } else { 0 }
+      foreach ($candResp in $globalJsonIndex.ResponseCandidates) {
+        $candRespLine = [int]$candResp.Line
+        if ($candRespLine -lt $reqLineFloor) { continue }
+        if ($usedResponseLines.Contains($candRespLine)) { continue }
+        $anchoredResponse = [PSCustomObject]@{
+          Line = $candRespLine
+          Json = [string]$candResp.Json
+        }
+        $responseJsonSet.Clear()
+        $null = $responseJsonSet.Add($anchoredResponse.Json)
+        break
+      }
+    }
+
+    if ($anchoredResponse -ne $null) {
+      $null = $usedResponseLines.Add([int]$anchoredResponse.Line)
     }
 
     $formattedBlocks = @()
@@ -1434,23 +2182,151 @@ try {
       DependencyTokenValueFromReplies = $depTokenValueFromReplies
     }
   }
+  }
+  }
 
-  $summaryTableRows = if ($summaryRows.Count -eq 0) {
-    "<tr><td colspan='4'>No failed transactions were detected in KO or Errors sections.</td></tr>"
+  $escapedScenario = Escape-Html $ScenarioName
+  $escapedHost = Escape-Html $HostName
+  $escapedRawLogPath = Escape-Html $localRawCopyPath
+  if ([string]::IsNullOrWhiteSpace($repliesYamlPathDisplay)) { $repliesYamlPathDisplay = "Not found" }
+  $escapedRepliesYamlPath = Escape-Html $repliesYamlPathDisplay
+  if ([string]::IsNullOrWhiteSpace($generatedAt)) { $generatedAt = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss zzz") }
+  if ($totalTransactions -le 0) { $totalTransactions = $allTransactionNames.Count }
+  $effectiveStartUsers = [int]$StartUsers
+  $effectiveEndUsers = [int]$EndUsers
+  if ($reportOnlyMode -and -not $PSBoundParameters.ContainsKey("StartUsers") -and -not $PSBoundParameters.ContainsKey("EndUsers") -and (Test-Path -LiteralPath $scenarioPath)) {
+    $scenarioForCounts = Get-Content -LiteralPath $scenarioPath -Raw
+    $mStartUsers = [regex]::Match($scenarioForCounts, '(?m)^\s*startUsers\s*:\s*(\d+)\s*$')
+    if ($mStartUsers.Success) { $effectiveStartUsers = [int]$mStartUsers.Groups[1].Value }
+    $mEndUsers = [regex]::Match($scenarioForCounts, '(?m)^\s*endUsers\s*:\s*(\d+)\s*$')
+    if ($mEndUsers.Success) { $effectiveEndUsers = [int]$mEndUsers.Groups[1].Value }
+  }
+  if ($effectiveStartUsers -lt 1) { $effectiveStartUsers = 1 }
+  if ($effectiveEndUsers -lt $effectiveStartUsers) { $effectiveEndUsers = $effectiveStartUsers }
+  $effectiveUserCount = [Math]::Max(1, ($effectiveEndUsers - $effectiveStartUsers + 1))
+
+  $effectiveUsername = $null
+  if (-not [string]::IsNullOrWhiteSpace($UsernameOverride)) {
+    $effectiveUsername = $UsernameOverride
+  } elseif (Test-Path -LiteralPath $scenarioDataPath) {
+    $scenarioDataForUser = Get-Content -LiteralPath $scenarioDataPath -Raw
+    $effectiveUsername = Get-ScenarioDataGlobalParamValue -Content $scenarioDataForUser -ParamName "username"
+  }
+  if ([string]::IsNullOrWhiteSpace($effectiveUsername)) { $effectiveUsername = "Unknown" }
+
+  function Get-UsernameDisplay {
+    param(
+      [string]$BaseUsername,
+      [int]$UserCount
+    )
+    if ([string]::IsNullOrWhiteSpace($BaseUsername)) { return "Unknown" }
+    if ($UserCount -le 1) { return $BaseUsername }
+    $m = [regex]::Match($BaseUsername, '^(.*?)(\d+)$')
+    if (-not $m.Success) { return "$BaseUsername (x$UserCount users)" }
+    $prefix = $m.Groups[1].Value
+    $startNumberText = $m.Groups[2].Value
+    $startNumber = [int]$startNumberText
+    $endNumber = $startNumber + $UserCount - 1
+    $endNumberText = $endNumber.ToString("D$($startNumberText.Length)")
+    return "$BaseUsername - $prefix$endNumberText"
+  }
+
+  $userCountDisplay = "$effectiveUserCount (start=$effectiveStartUsers, end=$effectiveEndUsers)"
+  $usernameDisplay = Get-UsernameDisplay -BaseUsername $effectiveUsername -UserCount $effectiveUserCount
+  $escapedUserCount = Escape-Html $userCountDisplay
+  $escapedUsername = Escape-Html $usernameDisplay
+
+  function Get-TransactionSortNumber {
+    param([string]$Transaction)
+    if ([string]::IsNullOrWhiteSpace($Transaction)) { return [int]::MaxValue }
+    $m = [regex]::Match($Transaction, '_(\d+)_\d+$')
+    if ($m.Success) { return [int]$m.Groups[1].Value }
+    $m2 = [regex]::Match($Transaction, '(\d+)')
+    if ($m2.Success) { return [int]$m2.Groups[1].Value }
+    return [int]::MaxValue
+  }
+
+  $reportRowsRaw = New-Object System.Collections.Generic.List[object]
+  foreach ($row in $summaryRows) {
+    $detail = if ($detailsByTransaction.ContainsKey($row.Transaction)) { $detailsByTransaction[$row.Transaction] } else { $null }
+    $respStatus = ""
+    if ($detail -ne $null) {
+      $respSource = if ($detail.ResponseJson -and $detail.ResponseJson.Count -gt 0) { [string]$detail.ResponseJson[0] } else { "" }
+      $respStatus = Get-ResponseStatusFromJsonText -JsonText $respSource
+      if ([string]::IsNullOrWhiteSpace($respStatus)) {
+        $respStatus = Get-ResponseStatusFromJsonText -JsonText ([string]$detail.RepliesYamlBody)
+      }
+      if (-not [string]::IsNullOrWhiteSpace($respStatus) -and $respStatus.Trim() -eq "0") {
+        # Report policy: do not display/track response status 0.
+        $respStatus = ""
+      }
+    }
+
+    $bucket = 99
+    $bucketLabel = ""
+    if ([string]$row.Source -eq "KO") {
+      $bucket = 1
+      $bucketLabel = "KO"
+    } elseif ([string]$row.Outcome -match '(?i)failed to build request') {
+      $bucket = 2
+      $bucketLabel = "Failed to build request"
+    } elseif ([string]::Equals($respStatus.Trim(), "Not S", [System.StringComparison]::OrdinalIgnoreCase)) {
+      $bucket = 3
+      $bucketLabel = "status Not S"
+    } else {
+      continue
+    }
+
+    $reportRowsRaw.Add([PSCustomObject]@{
+      Transaction = [string]$row.Transaction
+      Outcome = [string]$row.Outcome
+      Source = [string]$row.Source
+      ResponseStatus = [string]$respStatus
+      Bucket = $bucket
+      BucketLabel = $bucketLabel
+      TxSort = Get-TransactionSortNumber -Transaction ([string]$row.Transaction)
+    }) | Out-Null
+  }
+
+  $reportRows = @($reportRowsRaw | Sort-Object Bucket, TxSort, Transaction, Outcome)
+  $reportOrderedTransactions = New-Object System.Collections.Generic.List[string]
+  $reportSeenTx = @{}
+  foreach ($row in $reportRows) {
+    if (-not $reportSeenTx.ContainsKey($row.Transaction)) {
+      $reportSeenTx[$row.Transaction] = $true
+      $reportOrderedTransactions.Add([string]$row.Transaction) | Out-Null
+    }
+  }
+
+  # Build anchor map in final display order.
+  $anchorByTransaction = @{}
+  $anchorCounter = @{}
+  foreach ($tx in $reportOrderedTransactions) {
+    $baseAnchor = [regex]::Replace($tx.ToLowerInvariant(), '[^a-z0-9]+', '-').Trim('-')
+    if ([string]::IsNullOrWhiteSpace($baseAnchor)) { $baseAnchor = "tx" }
+    if ($anchorCounter.ContainsKey($baseAnchor)) { $anchorCounter[$baseAnchor]++ } else { $anchorCounter[$baseAnchor] = 1 }
+    $anchorByTransaction[$tx] = if ($anchorCounter[$baseAnchor] -gt 1) { "$baseAnchor-$($anchorCounter[$baseAnchor])" } else { $baseAnchor }
+  }
+
+  $summaryTableRows = if ($reportRows.Count -eq 0) {
+    "<tr><td colspan='5'>No failed transactions were detected in KO or Errors sections.</td></tr>"
   } else {
-    ($summaryRows | ForEach-Object {
+    ($reportRows | ForEach-Object {
       $txEsc = Escape-Html $_.Transaction
       $outEsc = Escape-Html $_.Outcome
       $anchor = $anchorByTransaction[$_.Transaction]
       $rec = ""
       $repState = "Not found in replies*.yaml"
       $repFile = ""
+      $respStatus = [string]$_.ResponseStatus
       if ($detailsByTransaction.ContainsKey($_.Transaction)) {
-        $rec = [string]$detailsByTransaction[$_.Transaction].Recommendation
-        $repState = [string]$detailsByTransaction[$_.Transaction].RepliesYamlState
-        $repFile = [string]$detailsByTransaction[$_.Transaction].RepliesYamlFileName
+        $detail = $detailsByTransaction[$_.Transaction]
+        $rec = [string]$detail.Recommendation
+        $repState = [string]$detail.RepliesYamlState
+        $repFile = [string]$detail.RepliesYamlFileName
       }
       $recEsc = Escape-Html $rec
+      $respStatusEsc = Escape-Html $respStatus
       $tokenVal = if ($detailsByTransaction.ContainsKey($_.Transaction)) { [string]$detailsByTransaction[$_.Transaction].DependencyTokenValueFromReplies } else { "" }
       if (-not [string]::IsNullOrWhiteSpace($tokenVal)) {
         $tokenVal = Truncate-Text -Value $tokenVal -MaxLength 160
@@ -1460,7 +2336,7 @@ try {
         $repDisplay = "$repDisplay | tokenValue=$tokenVal"
       }
       $repEsc = Escape-Html $repDisplay
-      "<tr><td><a href='#$anchor'>$txEsc</a></td><td><pre>$outEsc</pre></td><td><pre>$repEsc</pre></td><td><pre>$recEsc</pre></td></tr>"
+      "<tr><td><a href='#$anchor'>$txEsc</a></td><td><pre>$outEsc</pre></td><td><pre>$respStatusEsc</pre></td><td><pre>$repEsc</pre></td><td><pre>$recEsc</pre></td></tr>"
     }) -join "`n"
   }
 
@@ -1469,6 +2345,10 @@ try {
       [object]$Row,
       [object]$Detail
     )
+
+    if ($null -ne $Row -and $Row.PSObject.Properties.Name -contains 'BucketLabel' -and -not [string]::IsNullOrWhiteSpace([string]$Row.BucketLabel)) {
+      return [string]$Row.BucketLabel
+    }
 
     if ($null -ne $Row -and [string]$Row.Source -eq "KO") {
       return "KO"
@@ -1488,7 +2368,7 @@ try {
   }
 
   $failureTypeCounts = @{}
-  foreach ($row in $summaryRows) {
+  foreach ($row in $reportRows) {
     $detail = if ($detailsByTransaction.ContainsKey($row.Transaction)) { $detailsByTransaction[$row.Transaction] } else { $null }
     $failureType = Get-FailureType -Row $row -Detail $detail
     if ($failureTypeCounts.ContainsKey($failureType)) {
@@ -1498,10 +2378,10 @@ try {
     }
   }
 
-  $failureTypeSummaryHtml = if ($summaryRows.Count -eq 0) {
+  $failureTypeSummaryHtml = if ($reportRows.Count -eq 0) {
     "<p>No failed transactions found.</p>"
   } else {
-    $priority = @("KO", "Failed to build request", "Failure in replies.yaml", "Other Error")
+    $priority = @("KO", "Failed to build request", "status Not S", "Other Error")
     $orderedKeys = New-Object System.Collections.Generic.List[string]
     foreach ($k in $priority) {
       if ($failureTypeCounts.ContainsKey($k)) {
@@ -1524,14 +2404,14 @@ try {
     )
   }
 
-  $detailSections = if ($orderedTransactions.Count -eq 0) {
+  $detailSections = if ($reportOrderedTransactions.Count -eq 0) {
     "<p>No transaction-level details available.</p>"
   } else {
-    ($orderedTransactions | ForEach-Object {
+    ($reportOrderedTransactions | ForEach-Object {
       $tx = $_
       $anchor = $anchorByTransaction[$tx]
       $detail = $detailsByTransaction[$tx]
-      $txRows = $summaryRows | Where-Object { $_.Transaction -eq $tx }
+      $txRows = $reportRows | Where-Object { $_.Transaction -eq $tx }
       $summaryLine = ($txRows | ForEach-Object { "$($_.Source): $($_.Outcome)" }) -join " | "
       $summaryEsc = Escape-Html $summaryLine
       $recommendationEsc = Escape-Html ([string]$detail.Recommendation)
@@ -1676,9 +2556,11 @@ try {
   <div class='meta'>
     <div><strong>Scenario:</strong> $escapedScenario</div>
     <div><strong>Host:</strong> $escapedHost</div>
+    <div><strong>User Count:</strong> $escapedUserCount</div>
+    <div><strong>Username:</strong> $escapedUsername</div>
     <div><strong>Generated:</strong> $generatedAt</div>
     <div><strong>Total Transactions:</strong> $totalTransactions</div>
-    <div><strong>Total Failed Entries:</strong> $($summaryRows.Count)</div>
+    <div><strong>Total Failed Entries:</strong> $($reportRows.Count)</div>
     <div><strong>Raw Log Copy:</strong> $escapedRawLogPath</div>
     <div><strong>replies.yaml Source:</strong> $escapedRepliesYamlPath</div>
   </div>
@@ -1690,6 +2572,7 @@ try {
       <tr>
         <th>Transaction</th>
         <th>KO / Error</th>
+        <th>Response Status</th>
         <th>replies.yaml</th>
         <th>Recommendation</th>
       </tr>
@@ -1714,6 +2597,3 @@ try {
     Remove-Item -Path $tempRoot -Recurse -Force
   }
 }
-
-
-

@@ -10,6 +10,7 @@ description: Run a Gatling scenario from local YAML files against a remote Linux
 - or multiple scenario names (batch mode)
 - target alias (supported: `ablfhir`) or explicit host/user/auth
 - auth mode: either SSH key path (`-KeyPath`) or password (`-Password` / `GATLING_SSH_PASSWORD`)
+- application credential: set `GATLING_CONFIG_PASSWORD` before a normal run, or explicitly supply both forced password parameters
 
 ## Alias Mapping
 - `ablfhir` resolves to:
@@ -25,8 +26,8 @@ description: Run a Gatling scenario from local YAML files against a remote Linux
    - Default behavior: if run is for more than 1 user (`startUsers > 1` or `endUsers > 1`), `verboseLogging` defaults to `false` unless explicitly requested otherwise with `-VerboseLogging:$true`.
    - Single-user default remains `true` unless overridden.
    - Force `authority: ablfhir` in both `config.yaml` and `scenario-data.yaml`.
-   - Force `password: c0630system` in `config.yaml`.
-   - Force `password: scale` in `scenario-data.yaml`.
+   - Force `password: ${GATLING_CONFIG_PASSWORD}` in `config.yaml`.
+   - Force `password: ${GATLING_CONFIG_PASSWORD}` in `scenario-data.yaml`.
 4. Set `scenario.yaml` values before upload from run arguments:
 `durationSeconds` from `-DurationSeconds` (default `1`)
 `rampDurationSeconds` from `-RampDurationSeconds` (default `0`)
@@ -125,8 +126,8 @@ Examples with unified launcher:
 - If the user prompt says `on ablfhir`, call the script with `-TargetAlias ablfhir`.
 - If the user asks to run for `N` users, populate `N` rows in `scenario-data.yaml` `globalDataSets` and run with `-EndUsers N` (and `-StartUsers 1` unless user says otherwise).
 - The runner enforces `authority=ablfhir` in staged YAML files before remote execution.
-- For `ablfhir`, the runner enforces `password=c0630system` in staged `config.yaml`.
-- The runner enforces `password=scale` in staged `scenario-data.yaml`.
+- For `ablfhir`, the runner enforces `password=${GATLING_CONFIG_PASSWORD}` in staged `config.yaml`.
+- The runner enforces `password=${GATLING_CONFIG_PASSWORD}` in staged `scenario-data.yaml`.
 - Report layout policy: all per-scenario reports/artifacts must be written under `C:/Users/prakash/Desktop/project/NBS/gatling/reports/<scenario-name>/` (reuse folder if present).
 - Report/log naming policy: per-run HTML report and `.out` log filenames must include current local timestamp in numeric format only (`yyyyMMddHHmmss`).
 - Dependency evidence policy: for missing-token failures, prioritize source transaction request/response extraction from anywhere in the log (for example source request around line `98428` and response around line `413874`) rather than only nearby lines.
@@ -138,11 +139,3 @@ Examples with unified launcher:
 - Execution policy for this skill: start/continue execution immediately without skill-level confirmation prompts.
 - Prefer the unified launcher `run_skill_script.ps1` so one approved command pattern can cover current and newly-added scripts in this skill.
 - If the platform requires a first-time prefix approval, approve once and reuse the same launcher pattern for future non-interactive runs.
-
-
-
-
-
-
-
-

@@ -1,0 +1,470 @@
+﻿{
+    "Path":  "C:\\Users\\DP096786\\.codex\\skills\\txn-analyzer\\report_st5_R13.html",
+    "Tests":  {
+
+              },
+    "ExecutiveCpu":  [
+                         [
+                             "",
+                             "2026.3.01ST6",
+                             "2026.3.01ST6",
+                             "2026.4.01ST5",
+                             "2026.4.01ST5",
+                             "% Point Diff",
+                             "% Point Diff"
+                         ],
+                         [
+                             "",
+                             "Mean Total (%)",
+                             "Max Total (%)",
+                             "Mean Total (%)",
+                             "Max Total (%)",
+                             "Mean % Point Diff",
+                             "Max % Point Diff"
+                         ],
+                         [
+                             "Node Clusters",
+                             "",
+                             "",
+                             "",
+                             "",
+                             "",
+                             ""
+                         ],
+                         [
+                             "Mill. Database",
+                             "10.52",
+                             "23.30",
+                             "11.09",
+                             "24.30",
+                             "0.57 Increased",
+                             "1.00 Increased"
+                         ],
+                         [
+                             "Mill. Application",
+                             "43.77",
+                             "71.60",
+                             "44.41",
+                             "72.67",
+                             "0.64 Increased",
+                             "1.08 Increased"
+                         ],
+                         [
+                             "Citrix VDA",
+                             "15.69",
+                             "94.22",
+                             "15.21",
+                             "89.62",
+                             "0.48 Reduced",
+                             "4.60 Reduced"
+                         ]
+                     ],
+    "ExecutiveMemory":  [
+                            [
+                                "",
+                                "2026.3.01ST6",
+                                "2026.3.01ST6",
+                                "2026.3.01ST6",
+                                "2026.4.01ST5",
+                                "2026.4.01ST5",
+                                "2026.4.01ST5",
+                                "Diff",
+                                "Diff"
+                            ],
+                            [
+                                "",
+                                "Total",
+                                "Average Used",
+                                "Max Used",
+                                "Total",
+                                "Average Used",
+                                "Max Used",
+                                "Average Point Diff",
+                                "Max Point Diff"
+                            ],
+                            [
+                                "Node Clusters",
+                                "",
+                                "",
+                                "",
+                                "",
+                                "",
+                                "",
+                                "",
+                                ""
+                            ],
+                            [
+                                "Mill. Database",
+                                "256.00 GiB",
+                                "194.69 GiB",
+                                "195.04 GiB",
+                                "256.00 GiB",
+                                "193.91 GiB",
+                                "194.44 GiB",
+                                "0.78 GiB Reduced",
+                                "0.61 GiB Reduced"
+                            ],
+                            [
+                                "Mill. Application",
+                                "256.00 GiB",
+                                "191.20 GiB",
+                                "196.12 GiB",
+                                "256.00 GiB",
+                                "191.29 GiB",
+                                "196.71 GiB",
+                                "0.09 GiB Increased",
+                                "0.59 GiB Increased"
+                            ],
+                            [
+                                "Citrix VDA",
+                                "64.00 GiB",
+                                "10.36 GiB",
+                                "12.99 GiB",
+                                "64.00 GiB",
+                                "10.26 GiB",
+                                "13.00 GiB",
+                                "0.10 GiB Reduced",
+                                "0.00 GiB Increased"
+                            ]
+                        ],
+    "EggplantSuccessDrops":  [
+                                 {
+                                     "Workflow":  "ABL_PowerChart",
+                                     "BaselineRate":  "100.0%",
+                                     "CurrentRate":  "96.5%",
+                                     "BaselineSuccess":  "12",
+                                     "BaselineFailures":  "0",
+                                     "CurrentSuccess":  "12",
+                                     "CurrentFailures":  "0",
+                                     "CurrentTotal":  "14"
+                                 },
+                                 {
+                                     "Workflow":  "CPA_RemitModifyDisable",
+                                     "BaselineRate":  "100.0%",
+                                     "CurrentRate":  "90.0%",
+                                     "BaselineSuccess":  "8",
+                                     "BaselineFailures":  "0",
+                                     "CurrentSuccess":  "7",
+                                     "CurrentFailures":  "1",
+                                     "CurrentTotal":  "10"
+                                 },
+                                 {
+                                     "Workflow":  "ICU_IVIEW_GlobalSignResults",
+                                     "BaselineRate":  "93.3%",
+                                     "CurrentRate":  "96.7%",
+                                     "BaselineSuccess":  "12",
+                                     "BaselineFailures":  "1",
+                                     "CurrentSuccess":  "12",
+                                     "CurrentFailures":  "0",
+                                     "CurrentTotal":  "15"
+                                 },
+                                 {
+                                     "Workflow":  "MRD_LOADING_MAR",
+                                     "BaselineRate":  "93.8%",
+                                     "CurrentRate":  "94.1%",
+                                     "BaselineSuccess":  "14",
+                                     "BaselineFailures":  "1",
+                                     "CurrentSuccess":  "15",
+                                     "CurrentFailures":  "1",
+                                     "CurrentTotal":  "17"
+                                 },
+                                 {
+                                     "Workflow":  "RCA_SchedCheckinAppt",
+                                     "BaselineRate":  "95.8%",
+                                     "CurrentRate":  "95.8%",
+                                     "BaselineSuccess":  "10",
+                                     "BaselineFailures":  "0",
+                                     "CurrentSuccess":  "10",
+                                     "CurrentFailures":  "0",
+                                     "CurrentTotal":  "12"
+                                 },
+                                 {
+                                     "Workflow":  "RevCycleReg_Add_Encounter",
+                                     "BaselineRate":  "93.8%",
+                                     "CurrentRate":  "93.8%",
+                                     "BaselineSuccess":  "12",
+                                     "BaselineFailures":  "1",
+                                     "CurrentSuccess":  "12",
+                                     "CurrentFailures":  "1",
+                                     "CurrentTotal":  "16"
+                                 }
+                             ],
+    "ServiceTransactions":  [
+
+                            ],
+    "AppTierCpu":  [
+                       {
+                           "EntryId":  "373",
+                           "Name":  "Patient Demographics and Registration",
+                           "BaselineMessages":  "40,458",
+                           "CurrentMessages":  "40,466",
+                           "MessageDifference":  "8",
+                           "BaselineCpuSeconds":  "2,048",
+                           "CurrentCpuSeconds":  "2,526",
+                           "CpuDifferenceSeconds":  "478"
+                       },
+                       {
+                           "EntryId":  "51",
+                           "Name":  "CPM Script",
+                           "BaselineMessages":  "2,607,432",
+                           "CurrentMessages":  "2,607,797",
+                           "MessageDifference":  "366",
+                           "BaselineCpuSeconds":  "20,275",
+                           "CurrentCpuSeconds":  "20,498",
+                           "CpuDifferenceSeconds":  "222"
+                       },
+                       {
+                           "EntryId":  "79",
+                           "Name":  "CPM Script (mPages)",
+                           "BaselineMessages":  "1,126,500",
+                           "CurrentMessages":  "1,125,510",
+                           "MessageDifference":  "-990",
+                           "BaselineCpuSeconds":  "26,094",
+                           "CurrentCpuSeconds":  "26,280",
+                           "CpuDifferenceSeconds":  "186"
+                       },
+                       {
+                           "EntryId":  "2044",
+                           "Name":  "WorkFlow Management",
+                           "BaselineMessages":  "0",
+                           "CurrentMessages":  "0",
+                           "MessageDifference":  "0",
+                           "BaselineCpuSeconds":  "461",
+                           "CurrentCpuSeconds":  "529",
+                           "CpuDifferenceSeconds":  "68"
+                       }
+                   ],
+    "AppTierMemory":  [
+                          {
+                              "EntryId":  "2043",
+                              "Name":  "Patient and Encounter Accessibility",
+                              "BaselineRssMiB":  "806",
+                              "CurrentRssMiB":  "863",
+                              "RssDifferenceMiB":  "57",
+                              "BaselinePssMiB":  "780",
+                              "CurrentPssMiB":  "837",
+                              "PssDifferenceMiB":  "57"
+                          },
+                          {
+                              "EntryId":  "2060",
+                              "Name":  "Infection Control Worklists",
+                              "BaselineRssMiB":  "396",
+                              "CurrentRssMiB":  "452",
+                              "RssDifferenceMiB":  "56",
+                              "BaselinePssMiB":  "372",
+                              "CurrentPssMiB":  "428",
+                              "PssDifferenceMiB":  "56"
+                          },
+                          {
+                              "EntryId":  "2082",
+                              "Name":  "Small Report Generator",
+                              "BaselineRssMiB":  "616",
+                              "CurrentRssMiB":  "671",
+                              "RssDifferenceMiB":  "55",
+                              "BaselinePssMiB":  "589",
+                              "CurrentPssMiB":  "643",
+                              "PssDifferenceMiB":  "55"
+                          },
+                          {
+                              "EntryId":  "529",
+                              "Name":  "Documentation Quality",
+                              "BaselineRssMiB":  "777",
+                              "CurrentRssMiB":  "829",
+                              "RssDifferenceMiB":  "52",
+                              "BaselinePssMiB":  "746",
+                              "CurrentPssMiB":  "798",
+                              "PssDifferenceMiB":  "52"
+                          }
+                      ],
+    "WindowsSessionMonitor":  [
+                                  {
+                                      "Process":  "windowssessionmonitor.exe",
+                                      "BaselineCpuMs":  "204,207",
+                                      "CurrentCpuMs":  "195,980",
+                                      "CpuDifferencePercent":  "-4.0%",
+                                      "BaselineProcessCount":  "479",
+                                      "CurrentProcessCount":  "476"
+                                  }
+                              ],
+    "CitrixWorkflowCpu":  [
+                              {
+                                  "Workflow":  "ICU_INO2G_GlobalSignResults",
+                                  "Process":  "powerchart.exe",
+                                  "BaselinePerIterationMs":  "23,559",
+                                  "CurrentPerIterationMs":  "24,516",
+                                  "DifferencePerIterationMs":  "957",
+                                  "BaselineSuccessPercent":  "100.0%",
+                                  "CurrentSuccessPercent":  "100.0%"
+                              },
+                              {
+                                  "Workflow":  "CPA_GenericVariance",
+                                  "Process":  "RevenueCycle.exe",
+                                  "BaselinePerIterationMs":  "25,073",
+                                  "CurrentPerIterationMs":  "25,851",
+                                  "DifferencePerIterationMs":  "778",
+                                  "BaselineSuccessPercent":  "100.0%",
+                                  "CurrentSuccessPercent":  "100.0%"
+                              },
+                              {
+                                  "Workflow":  "MGC_Documents",
+                                  "Process":  "powerchart.exe",
+                                  "BaselinePerIterationMs":  "7,853",
+                                  "CurrentPerIterationMs":  "8,165",
+                                  "DifferencePerIterationMs":  "312",
+                                  "BaselineSuccessPercent":  "100.0%",
+                                  "CurrentSuccessPercent":  "100.0%"
+                              },
+                              {
+                                  "Workflow":  "PEX_AmbOrgUserView",
+                                  "Process":  "msedgewebview2.exe",
+                                  "BaselinePerIterationMs":  "20,572",
+                                  "CurrentPerIterationMs":  "20,820",
+                                  "DifferencePerIterationMs":  "248",
+                                  "BaselineSuccessPercent":  "100.0%",
+                                  "CurrentSuccessPercent":  "100.0%"
+                              }
+                          ],
+    "DatabaseSummary":  [
+                            [
+                                "TestName",
+                                "2026.3.01ST6",
+                                "2026.4.01ST5",
+                                "Comparison"
+                            ],
+                            [
+                                "Metric",
+                                "",
+                                "",
+                                ""
+                            ],
+                            [
+                                "SQL Statistics",
+                                "SQL Statistics",
+                                "SQL Statistics",
+                                "SQL Statistics"
+                            ],
+                            [
+                                "Elapsed Time (s)",
+                                "29,514",
+                                "30,146",
+                                "2%"
+                            ],
+                            [
+                                "CPU Time (s)",
+                                "24,114",
+                                "25,450",
+                                "6%"
+                            ],
+                            [
+                                "User I/O Time (s)",
+                                "3,442",
+                                "3,712",
+                                "8%"
+                            ],
+                            [
+                                "Cluster Wait Time (s)",
+                                "0",
+                                "39",
+                                "7,700%"
+                            ],
+                            [
+                                "Buffer Gets",
+                                "4,930,286,504",
+                                "4,906,217,021",
+                                "-0%"
+                            ],
+                            [
+                                "Disk Reads",
+                                "12,563,553",
+                                "13,421,634",
+                                "7%"
+                            ],
+                            [
+                                "Executions",
+                                "47,728,928",
+                                "48,497,534",
+                                "2%"
+                            ],
+                            [
+                                "Foreground Wait Classes - % of Total DB Time",
+                                "Foreground Wait Classes - % of Total DB Time",
+                                "Foreground Wait Classes - % of Total DB Time",
+                                "Foreground Wait Classes - % of Total DB Time"
+                            ],
+                            [
+                                "DB CPU %",
+                                "73.83%",
+                                "76.40%",
+                                "2.57%"
+                            ],
+                            [
+                                "Application %",
+                                "5.79%",
+                                "6.70%",
+                                "0.91%"
+                            ],
+                            [
+                                "User I/O %",
+                                "10.52%",
+                                "11.12%",
+                                "0.61%"
+                            ],
+                            [
+                                "Cluster %",
+                                "0.00%",
+                                "0.12%",
+                                "0.12%"
+                            ],
+                            [
+                                "Other %",
+                                "0.83%",
+                                "0.86%",
+                                "0.03%"
+                            ],
+                            [
+                                "Concurrency %",
+                                "0.04%",
+                                "0.04%",
+                                "0.00%"
+                            ],
+                            [
+                                "Administrative %",
+                                "0.00%",
+                                "0.00%",
+                                "0.00%"
+                            ],
+                            [
+                                "Scheduler %",
+                                "0.00%",
+                                "0.00%",
+                                "0.00%"
+                            ],
+                            [
+                                "Network %",
+                                "0.58%",
+                                "0.58%",
+                                "-0.00%"
+                            ],
+                            [
+                                "Configuration %",
+                                "0.01%",
+                                "0.01%",
+                                "-0.00%"
+                            ],
+                            [
+                                "System I/O %",
+                                "0.47%",
+                                "0.44%",
+                                "-0.04%"
+                            ],
+                            [
+                                "Commit %",
+                                "7.93%",
+                                "3.75%",
+                                "-4.19%"
+                            ]
+                        ],
+    "RtmsTimers":  [
+
+                   ]
+}

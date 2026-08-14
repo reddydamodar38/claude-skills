@@ -1,0 +1,7 @@
+interface:
+  display_name: "TORQ Pre-Run"
+  short_description: "Check, clean, and recover TORQ/CTX nodes"
+  default_prompt: "Use $torq-pre-run for the ablscale3 TORQ domain to check SUT and CTX nodes, clean xaauto artifacts if needed, restart BrokerAgent for slow CTX login, and reboot only when I include -reboot."
+
+policy:
+  allow_implicit_invocation: true

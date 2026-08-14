@@ -1,0 +1,6 @@
+**/__pycache__/
+**/*.pyc
+**/.skill-build/
+**/.codex-gatling-batch-work/
+**/outputs/
+**/report*.html

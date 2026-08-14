@@ -1,0 +1,12 @@
+interface:
+  display_name: "Transaction Workflow Investigator"
+  short_description: "Map transactions, scripts, bindings, servers, and workflows from flat files."
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

@@ -1,0 +1,4 @@
+Pss: 204800 kB
+Private_Dirty: 102400 kB
+Shared_Clean: 51200 kB
+

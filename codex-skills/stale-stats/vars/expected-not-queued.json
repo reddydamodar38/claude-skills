@@ -1,0 +1,17 @@
+{
+  "stale_stats_expected_not_queued_defaults": [
+    "DM_INFO",
+    "DM_STAT_TABLE",
+    "DM_PROCESS_EVENT",
+    "DM_PROCESS"
+  ],
+  "stale_stats_expected_not_queued_by_domain": {
+    "ablscale3": [
+      "DM_PROCESS_QUEUE",
+      "HE_JOB",
+      "MP_GROUP_REFRESH_STATE"
+    ]
+  },
+  "stale_stats_expected_not_queued_derived": "{{ stale_stats_expected_not_queued_defaults + stale_stats_expected_not_queued_by_domain.get(stale_stats_domain | lower, []) }}",
+  "stale_stats_expected_not_queued_effective": "{{ stale_stats_expected_not_queued | default(stale_stats_expected_not_queued_derived) }}"
+}

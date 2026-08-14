@@ -1,0 +1,40 @@
+---
+- name: Verify the restore-point reporting query without changing Oracle
+  hosts: primaryDB
+  gather_facts: false
+  become: true
+  become_user: oracle
+  tasks:
+    - name: Load production Oracle environment resolution
+      ansible.builtin.import_tasks: /skill/playbooks/tasks/resolve-sqlplus.yml
+
+    - name: Read the current ABL restore point
+      ansible.builtin.shell: |
+        "{{ stale_stats_sqlplus_path.stdout | trim }}" -s / as sysdba <<'SQL'
+        whenever sqlerror exit sql.sqlcode
+        set heading off feedback off pagesize 0 linesize 400 trimspool on verify off echo off
+        select 'RESTORE_POINT_COUNT=' || count(*)
+          from v$restore_point
+         where name = 'ABL_RESTORE_POINT';
+        select 'CURRENT_RESTORE_POINT=' || name || '|SCN=' || scn || '|TIME=' ||
+               to_char(time, 'YYYY-MM-DD"T"HH24:MI:SS.FF3') ||
+               '|GUARANTEE=' || guarantee_flashback_database
+          from v$restore_point
+         where name = 'ABL_RESTORE_POINT';
+        exit
+        SQL
+      args:
+        executable: /bin/ksh
+      environment:
+        ORACLE_HOME: "{{ stale_stats_oracle_home.stdout | trim }}"
+        ORACLE_SID: "{{ stale_stats_oracle_sid.stdout | trim }}"
+      register: restorepoint_reporting
+      changed_when: false
+      failed_when:
+        - restorepoint_reporting.rc != 0
+        - "'RESTORE_POINT_COUNT=1' not in restorepoint_reporting.stdout"
+        - "'CURRENT_RESTORE_POINT=ABL_RESTORE_POINT' not in restorepoint_reporting.stdout"
+
+    - name: Report the current restore point
+      ansible.builtin.debug:
+        var: restorepoint_reporting.stdout_lines

@@ -1,0 +1,4 @@
+interface:
+  display_name: "CMB Copy"
+  short_description: "Copy CMB logs from ABLCAPUTIL runs"
+  default_prompt: "Use $cmb-copy to copy cmb_2030_* files for SCP2030."

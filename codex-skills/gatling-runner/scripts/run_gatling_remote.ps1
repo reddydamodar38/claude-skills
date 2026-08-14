@@ -13,8 +13,8 @@ param(
   [string]$ReplacementFrom = "MillDomain",
   [string]$ReplacementTo = "ablfhir",
   [string]$ForcedAuthority = "ablfhir",
-  [string]$ForcedConfigPassword = "c0630system",
-  [string]$ForcedScenarioDataPassword = "scale",
+  [string]$ForcedConfigPassword = $env:GATLING_CONFIG_PASSWORD,
+  [string]$ForcedScenarioDataPassword = $env:GATLING_CONFIG_PASSWORD,
   [string]$UsernameOverride,
   [switch]$ResolveUserIdFromDb,
   [string]$DbEnv = "ABLFHIR",
@@ -32,6 +32,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $reportOnlyMode = -not [string]::IsNullOrWhiteSpace($ReportOnlyOutPath)
+
+if (-not $reportOnlyMode) {
+  if ([string]::IsNullOrWhiteSpace($ForcedConfigPassword) -or [string]::IsNullOrWhiteSpace($ForcedScenarioDataPassword)) {
+    throw "GATLING_CONFIG_PASSWORD must be set unless both forced password parameters are supplied."
+  }
+}
 
 # Multi-user runs are noisy by default; disable verbose logging unless explicitly requested.
 if (($StartUsers -gt 1 -or $EndUsers -gt 1) -and -not $PSBoundParameters.ContainsKey("VerboseLogging")) {
@@ -436,8 +442,8 @@ try {
     }
 
     if ($usingKey) {
-    $sshCommon = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-i", $KeyPath)
-    $scpCommon = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-i", $KeyPath)
+    $sshCommon = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-i", $KeyPath)
+    $scpCommon = @("-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-i", $KeyPath)
     $target = "$UserName@$HostName"
 
     $prepareCmd = "set -e; rm -rf '$remoteRunDir'; mkdir -p '$remoteRunDir'; mkdir -p '$RemoteBaseDir/$RemoteReportDirName'; rm -f '$remoteOutFile'"
@@ -449,7 +455,7 @@ try {
     & ssh @sshCommon $target "set -e; tar -xzf '$remoteUploadArchive' -C '$remoteRunDir'; rm -f '$remoteUploadArchive'"
     if ($LASTEXITCODE -ne 0) { throw "Remote extract failed for staged input archive." }
 
-    $runCmd = "cd '$RemoteBaseDir' && bash -lc 'set -o pipefail; java -jar gatling-crank-executor.jar ./$remoteTempDirName ./$RemoteReportDirName false 0 2>&1 | tee gatling.$remoteTempDirName.out; exit `${PIPESTATUS[0]}'"
+    $runCmd = "cd '$RemoteBaseDir' && bash --noprofile --norc -c 'set -o pipefail; java -jar gatling-crank-executor.jar --data-directory ./$remoteTempDirName --report-directory ./$RemoteReportDirName --no-reports false --metrics-interval 0 2>&1 | tee gatling.$remoteTempDirName.out; exit `${PIPESTATUS[0]}'"
     Write-Host "Streaming remote Gatling console output..."
     & ssh @sshCommon $target $runCmd 2>&1 | ForEach-Object {
       if ($null -eq $_) { return }
@@ -489,7 +495,7 @@ try {
         throw "Remote extract step failed: $($extractResult.Error -join ' | ')"
       }
 
-      $runCmd = "cd '$RemoteBaseDir' && java -jar gatling-crank-executor.jar ./$remoteTempDirName ./$RemoteReportDirName false 0 > gatling.$remoteTempDirName.out 2>&1"
+      $runCmd = "cd '$RemoteBaseDir' && java -jar gatling-crank-executor.jar --data-directory ./$remoteTempDirName --report-directory ./$RemoteReportDirName --no-reports false --metrics-interval 0 > gatling.$remoteTempDirName.out 2>&1"
       $runResult = Invoke-SSHCommand -SessionId $session.SessionId -Command $runCmd -TimeOut ($ExecutionTimeoutSeconds * 1000)
       if ($runResult.Output) {
         foreach ($line in $runResult.Output) {
@@ -897,6 +903,68 @@ try {
         $map[$txName] = [PSCustomObject]@{
           Status = Get-RepliesYamlStatusFromBody -ReplyBody $bodyRaw
           Body = $bodyPretty
+          FileName = [System.IO.Path]::GetFileName($filePath)
+          SourcePath = $filePath
+        }
+      }
+    }
+
+    return $map
+  }
+
+  function Parse-RepliesYamlTransactionStatuses {
+    param([string[]]$RepliesYamlPaths)
+
+    $map = @{}
+    if ($null -eq $RepliesYamlPaths -or $RepliesYamlPaths.Count -eq 0) { return $map }
+
+    foreach ($filePath in $RepliesYamlPaths) {
+      if ([string]::IsNullOrWhiteSpace($filePath) -or -not (Test-Path $filePath)) { continue }
+      $reader = [System.IO.StreamReader]::new($filePath)
+      $txName = $null
+      $sawFailure = $false
+      $sawSuccess = $false
+      try {
+        while (($line = $reader.ReadLine()) -ne $null) {
+          $txMatch = [regex]::Match($line, '^\s*-\s*transName:\s*"([^"]+)"')
+          if ($txMatch.Success) {
+            if (-not [string]::IsNullOrWhiteSpace($txName) -and -not $map.ContainsKey($txName)) {
+              $status = if ($sawFailure) { "Failure in replies.yaml" } elseif ($sawSuccess) { "Success in replies.yaml" } else { "Unknown in replies.yaml" }
+              $map[$txName] = [PSCustomObject]@{
+                Status = $status
+                Body = ""
+                FileName = [System.IO.Path]::GetFileName($filePath)
+                SourcePath = $filePath
+              }
+            }
+            $txName = $txMatch.Groups[1].Value.Trim()
+            $sawFailure = $false
+            $sawSuccess = $false
+            continue
+          }
+
+          if ([string]::IsNullOrWhiteSpace($txName)) { continue }
+          if ($line -match '(?i)"success_ind"\s*:\s*"?0"?' -or
+              $line -match '(?i)"successindicator"\s*:\s*"?0"?' -or
+              $line -match '(?i)"status"\s*:\s*"(F|0)"' -or
+              $line -match '(?i)"operationstatus"\s*:\s*"F"') {
+            $sawFailure = $true
+          } elseif ($line -match '(?i)"success_ind"\s*:\s*"?1"?' -or
+                    $line -match '(?i)"successindicator"\s*:\s*"?1"?' -or
+                    $line -match '(?i)"status"\s*:\s*"(S|Z|1)"' -or
+                    $line -match '(?i)"operationstatus"\s*:\s*"S"') {
+            $sawSuccess = $true
+          }
+        }
+      } finally {
+        $reader.Dispose()
+      }
+
+      if (-not [string]::IsNullOrWhiteSpace($txName) -and -not $map.ContainsKey($txName)) {
+        $status = if ($sawFailure) { "Failure in replies.yaml" } elseif ($sawSuccess) { "Success in replies.yaml" } else { "Unknown in replies.yaml" }
+        $map[$txName] = [PSCustomObject]@{
+          Status = $status
+          Body = ""
           FileName = [System.IO.Path]::GetFileName($filePath)
           SourcePath = $filePath
         }
@@ -1705,8 +1773,13 @@ try {
   $escapedScenario = Escape-Html $ScenarioName
   $escapedHost = Escape-Html $HostName
   $escapedRawLogPath = Escape-Html $localRawCopyPath
+  $largeLogSummaryMode = (-not $pythonParsed -and $lines.Count -gt 200000)
   $repliesYamlPaths = Resolve-RepliesYamlPaths -ScenarioDirectory $scenarioDir
-  $repliesYamlMap = Parse-RepliesYamlTransactions -RepliesYamlPaths $repliesYamlPaths
+  $repliesYamlMap = if ($largeLogSummaryMode) {
+    Parse-RepliesYamlTransactionStatuses -RepliesYamlPaths $repliesYamlPaths
+  } else {
+    Parse-RepliesYamlTransactions -RepliesYamlPaths $repliesYamlPaths
+  }
   foreach ($txName in $repliesYamlMap.Keys) {
     $entry = $repliesYamlMap[$txName]
     $state = if ($null -ne $entry) { [string]$entry.Status } else { "" }
@@ -1751,6 +1824,52 @@ try {
 
   # Gather detail evidence per transaction with line-numbered blocks.
   $detailsByTransaction = @{}
+  if ($largeLogSummaryMode) {
+    Write-Warning "Large output detected ($($lines.Count) lines). Using bounded summary mode for the PowerShell report parser."
+    foreach ($tx in $orderedTransactions) {
+      $txRowsForRecommendation = @($summaryRows | Where-Object { $_.Transaction -eq $tx })
+      $emptyDetailForRecommendation = [PSCustomObject]@{
+        MatchedLines = @()
+        ResponseJson = @()
+      }
+      $recommendation = Get-TransactionRecommendation -TransactionRows $txRowsForRecommendation -Detail $emptyDetailForRecommendation
+
+      $repliesState = "Not found in replies*.yaml"
+      $repliesFileName = ""
+      $repliesEntry = Resolve-RepliesEntryForTransaction -RepliesMap $repliesYamlMap -Transaction $tx
+      if ($repliesEntry -ne $null) {
+        $repliesState = [string]$repliesEntry.Status
+        $repliesFileName = [string]$repliesEntry.FileName
+      }
+
+      $detailsByTransaction[$tx] = [PSCustomObject]@{
+        MatchedLines = @()
+        RangeBlocks = @()
+        RequestJson = @()
+        ResponseJson = @()
+        RequestLine = $null
+        ResponseLine = $null
+        WindowStartLine = $null
+        WindowEndLine = $null
+        Recommendation = $recommendation
+        RepliesYamlState = $repliesState
+        RepliesYamlFileName = $repliesFileName
+        RepliesYamlBody = ""
+        MissingTokenExpression = ""
+        MissingTokenErrorLine = $null
+        DependencySourceTransaction = ""
+        DependencyRequestJson = ""
+        DependencyRequestLine = $null
+        DependencyResponseJson = ""
+        DependencyResponseLine = $null
+        DependencyRepliesYamlState = "Not found in replies*.yaml"
+        DependencyRepliesYamlFileName = ""
+        DependencyRepliesYamlBody = ""
+        DependencyTokenPathInReplies = ""
+        DependencyTokenValueFromReplies = ""
+      }
+    }
+  } else {
   $globalJsonIndex = Build-GlobalJsonIndexes -AllLines $lines
   $usedRequestLines = New-Object 'System.Collections.Generic.HashSet[int]'
   $usedResponseLines = New-Object 'System.Collections.Generic.HashSet[int]'
@@ -2062,6 +2181,7 @@ try {
       DependencyTokenPathInReplies = $depTokenPathInReplies
       DependencyTokenValueFromReplies = $depTokenValueFromReplies
     }
+  }
   }
   }
 
@@ -2477,7 +2597,3 @@ try {
     Remove-Item -Path $tempRoot -Recurse -Force
   }
 }
-
-
-
-

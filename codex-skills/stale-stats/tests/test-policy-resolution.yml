@@ -1,0 +1,13 @@
+- name: Verify effective stale-stats exception policy
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../vars/expected-not-queued.json
+  tasks:
+    - name: Assert the resolved table-family list
+      ansible.builtin.assert:
+        that:
+          - stale_stats_expected_not_queued_effective == expected_effective
+        fail_msg: >-
+          Expected {{ expected_effective }}, got
+          {{ stale_stats_expected_not_queued_effective | default('UNDEFINED') }}.

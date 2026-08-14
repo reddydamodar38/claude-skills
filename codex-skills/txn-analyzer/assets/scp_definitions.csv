@@ -1,0 +1,532 @@
+SCP_Number,ServerName,Service,Binding
+100,ORM Format Server,orm_srvfmt,
+101,ORM Order Write Synch,orm_ordsrv_s,
+102,DCP Task Server,dcp_srvtask,
+103,DCP Task Query Server,dcp_srvquerytasks,
+104,ORM Order Write Asynch,orm_ordsrv_a,
+105,ORM Explode Cont Order,orm_ecosrv_a,
+106,DCP Output,dcp_srvoutput,
+107,ORM Order Write Synch For FSI,orm_ordsrv_s,orm.fsiorderwritesynch
+108,ORM Explode Cont Order 001,orm_ecosrv_a,orm.explodecontorder001
+109,OAR Order Proposal Server Synch,oar_srvorderproposal_s,
+110,RadNet Async Script,cpm_srvscripta,CPMScriptAsyncRAD
+111,OAR Order Process Server Asynch,oar_srvorderprocess_a,
+112,OAR Order Process Server Synch,oar_srvorderprocess_s,
+114,CPM Script (DCP Task Interface),,CpmScriptDcpTask
+115,DCP Pathway Server,dcp_srvpathway,
+116,DCP Write Outcome Async,dcp_srvwriteoutcome,
+117,DCP Query Outcome,dcp_srvqueryoutcome,
+118,OAR Admin Process Server Synch,oar_srvadminprocess_s,
+119,DCP Query Plans,dcp_srvqueryplans,
+120,DCP Task Order Server Asynch,dcp_srvtaskord,
+121,DCP Task Admin Server Synch,dcp_srvtaskadmin_s,
+126,DMS Async Server,dms_srvasync,
+127,System Print Server (Node Specific),,
+128,Print Services Cache Manager,sys_srvprintcache,
+129,System Print Server,,
+130,PathNet Resource Routing Server,path_srvres,
+131,SCS Netting Server,scs_srvnetting,
+132,SCS Collections Server,scs_srvcoltn,
+133,PathNet Result Order Posting Server,path_srvprop,
+134,PathNet Sync Result Order Posting Server,path_srvpropsync,
+140,Pathnet - AP Case Retrieval Server,aps_srvcaseretrieval,
+141,Pathnet - AP Automatic Diagnostic Coder,aps_srvautocoder,
+142,Pathnet - AP Interactive Diagnostic Code,aps_srvintercoder,
+144,Pathnet - AP Coding Cache Manager,aps_srvcachemanager,
+150,Discern Expert Server (EKS_ASYNCH_01),eks_srvexpert,eks_asynch_01
+151,Discern Expert Server (EKS_ASYNCH_02),eks_srvexpert,eks_asynch_02
+152,Discern Expert Server (EKS_ASYNCH_03),eks_srvexpert,eks_asynch_03
+153,Discern Expert Server (EKS_ASYNCH_04),eks_srvexpert,eks_asynch_04
+170,Discern ODBC,dbc_srvodbc,
+175,Discern Expert Server (CPM.EKS),eks_srvexpert_sync,CPM.EKS
+176,Discern Event Server,eks_srvevent,
+178,CPM Script (Custom),-offer -factor 1,cpmscript_cust
+179,CPM Script Batch (Custom),-offer -factor 1,CpmScriptBatch_Cust
+1900,FSI ESO Server Load #16,fsi_srveso,listener16
+1901,FSI ESO Server Load #17,fsi_srveso,listener17
+1902,FSI ESO Server Load #18,fsi_srveso,listener18
+1903,FSI ESO Server Load #19,fsi_srveso,listener19
+1904,FSI ESO Server Load #20,fsi_srveso,listener20
+1905,FSI ESO Server Load #21,fsi_srveso,listener21
+1906,FSI ESO Server Load #22,fsi_srveso,listener22
+1907,FSI ESO Server Load #23,fsi_srveso,listener23
+1908,FSI ESO Server Load #24,fsi_srveso,listener24
+1909,FSI ESO Server Load #25,fsi_srveso,listener25
+1910,FSI ESO Server Load #26,fsi_srveso,listener26
+1911,FSI ESO Server Load #27,fsi_srveso,listener27
+1912,FSI ESO Server Load #28,fsi_srveso,listener28
+1913,FSI ESO Server Load #29,fsi_srveso,listener29
+1914,FSI ESO Server Load #30,fsi_srveso,listener30
+20,Message Agent,,
+200,Clinical Event Server,ocf_event_server,
+2000,CPOE Conversation,CPOEConversation OrdersStaging,
+2001,Clinical Quality,clinicalquality clinicalqualityasync,
+2003,Ambulatory Patient Timeline,ambulatory_patient_timeline,
+2004,Pharmacy Prescription Order Management,PrescriptionOrderQuery SuspendedOrder,
+2005,Health Concerns,healthconcerns,
+2006,CPOE Electronic Prescribing,CPOEPriorAuthorization priorauth ElectronicPrescribing CPOEErxConfig,
+2007,EPrescription Mgmt,erxrequisitionmanager erxstatusmanager erxstore erxdeny,
+2008,HIM Chart Completion Agent,-agent DeficientOrdersAgent,
+2010,Patient Notices,criticalpatientinformation insuredeligibleservices immunizationaudit,
+2011,Care Management Agent,-agent AvoidableDaysAgent SendCCDsAgent,
+2012,General Configuration Management,Configuration,
+2013,Data Extraction Async,ExtractionAsync,
+2014,Data Extraction Async Channel2,ExtractionAsyncChannel2,
+2016,Auto Save,AutoSave,
+2017,Dynamic Documentation Ancillary,DDAutoSave NoteType DDCDA,
+2018,Pharmacy Prescription Process,PharmacyPrescriptionProcess PharmacySurescriptsPrescriber PharmacyElectronicPrescriptionsView,
+2019,Pharmacy Prescription Message,PharmacyPrescriptionMessage,
+2021,Consumer Notification,ConsumerNotification,
+2022,Workflow Task Processing Broker,WTPGetBunchesSync,
+2023,Pharmacy Claim Query,pharmacyclaimquery,
+2024,Data Extraction,Extraction,
+2025,Integrated Case PickList,PickList,
+2026,Cardiology Results,ResultsRetrieval,
+2027,Barcode Processing,scanbarcode,
+2028,EPrescription Hub Proxy,erxconfig pharmacyretrieval formularybenefits,
+2029,CPOE Orders and Plans,cpoeorderinfo,
+2030,Feature Toggle Management,feature_toggle,
+2031,Data Record Retention,DataRecordRetentionQueue,
+2032,Pharmacy Batch Prescription Management,PharmacyBatchPrescriptionManagerAsync,
+2033,Financial Clearance Transactions Agent,-agent MedicalEligibilityAgent DeferredRuleProcessingAgent,
+2034,Prescription Refill Request Management,RefillRequest,
+2035,Pharmacy Prescription Dispense,PrescriptionDispenseQuery,
+2036,Patient Outcomes View Management,Patient_Outcomes_View,
+2037,Document Imaging Agents,-agent DocumentPurgeAgent,
+2038,Inbound ePrescribing Services,InboundERxRenewal InboundERxChange InboundEPrescribing,
+2039,Clinical Inventory Management,inventoryitem editransaction,
+2040,Clinical Validation,clinicalvalidation,
+2041,ePrescribing Interoperability,ErxService sieprescribemaintain sieprescribequery,
+2042,Physician Interop Retrieval,InteropPreference RecordSynchronization ExternalSourceConfiguration,
+2043,Patient and Encounter Accessibility,PatientSecurity EncounterSecurity,
+2044,WorkFlow Management,WorkItemPriority,
+2045,Quality Measures,QualityMeasuresComponent,
+2047,Pharmacy Formulary,rxformulary rxformularymgmtasync,
+2048,Patient Consent Management,patientconsentsync patientconsentasync,
+2049,PatientConsent Agent,-agent PatientDataConsentAgent,
+205,Clinical Event Server For ESI,ocf_event_server,ESI
+2050,Security RoleProfile,SecurityRoleProfile,
+2052,Provenance Management,Provenance,
+2053,Organization Retrieval,OrganizationRetrieval,
+2054,External Document Metadata Stager,ExternalDocumentMetadata ExternalDocumentImporter,
+2055,UK Reporting,VONCohort MARS ECDS FitNote,
+2057,Advanced Interop Trigger,SiAdvancedInteropTrigger,
+2058,Si Immunization Management,SiImmunization,
+2059,Reference Data Management,DBRefData,
+206,Dedicated Hx Clinical Event for FSI,ocf_event_server,BATCH206_01
+2060,Infection Control Worklists,AlertData ProcessPatientData GenerateWorklist,
+2061,Pharmacy Order Product Sync,PharmacyExternalOrderProductSync,
+2062,Event Set Hierarchy Sync,event_set_path,
+2063,Event Set Hierarchy Associations,EventCodeAssociations,
+2064,Patient and Registration Reconciliation,PersonReconciler RegistrationReconciler,
+2065,Blood Inventory External Interface,BloodInventoryRecords,
+2066,Organization Security Policy,orgsecuritypolicy orgsecuritypolicywrite,
+2067,active choice aggregator,PatientLocations,
+2068,Clinical Event Blob,ce_blob,
+2069,Implantable Device SNOMED Information,SNOMEDInfo,
+207,Dedicated VA Hx CE for ESI,ocf_event_server,HXVACE207N01
+2071,OEN Interface Utilities,OenRouteService,
+2073,Orders Agents,-agent TrackedOrdersRemovalAgent,
+2074,Messaging Interoperability Async,ExternalServiceAsync,
+2075,Document Consumer,ExternalDocument,
+2077,Adjudicator,Adjudicator,
+2078,Security Service,security security_passthrough,
+2079,Report Distributor,ReportDistributor,
+2081,Report Generator,ReportGenerator,
+2082,Small Report Generator,SmallReportGenerator,
+2083,Orion Directory Service,OrionDirectory,
+2084,Shadow Accounts Manager,-agent ShadowAccountsAgent,
+2085,Service Resource EJS Service,ServiceResourcePrsnlReltnService,
+2086,EHI Export,EhiExtractOrchestrator,
+2087,Report Ingress,ReportIngress,
+2089,Exception Monitor,-agent ExmonAgent,
+209,Clinical Event Server - Batch,ocf_event_server,event_batch
+2091,Convert Formatted Markup Server,ConvertFormattedMarkup,
+2092,Registration Agent,-agent AddressValidationRegisterAgent AddressValidationProcessAgent,
+21,Time Service,srvtime,
+210,FSI ESO Alternate Server #1,fsi_srveso,alt1
+211,FSI ESO Alternate Server #2,fsi_srveso,alt2
+212,FSI ESO Alternate Server #3,fsi_srveso,alt3
+213,FSI ESO Alternate Server #4,fsi_srveso,alt4
+214,FSI ESO Alternate Server #5,fsi_srveso,alt5
+221,Search Server,ocf_search_server,
+225,OCF Unit Server,ocf_unit_server,
+226,Task Completion Service,task_completion_service,
+230,MDI Genlab Result Client,mdi_cltresults,MdiClt001
+231,MDI Result Server,mdi_srvresults,
+232,MDI Micro Result Client,mdi_cltresults,MdiClt002
+233,MDI Result Order Posting Server,mdi_srvrop,
+234,MDI ROP Result Client,mdi_cltresults,MdiClt003
+235,MDI Order Server,mdi_srvorders,
+236,MDI Direct Result Server,mdi_dirresults,
+237,BMDI Result Server,bmdi_srvresults,
+238,CareAware MDI,CA.MDI,
+239,CareAware BMDI,CA.BMDI,
+240,OEN Controller,oen_srvcontrol -args 997,
+243,OEN Interface Debugger,oen_srvrouter_cqm -args 996,oen.debugrouterservice
+245,OEN Router,oen_srvrouter_cqm -args 998,
+247,OEN CQM Router,,
+249,Dedicated VA Hx ESI Server,cpm_srvesi,HXVAESI249N02
+25,Preference Manager,pref_server,
+250,CPM ESI Server,cpm_srvesi,
+251,Dedicated Hx ESI Server,cpm_srvesi,
+252,FSI ESO-CQM Server,fsi_srvcqm,
+253,SI ESI Server,si_srvesi,
+254,FSI Outbound ComClient Server,fsi_srvocc,
+255,Fsi Order Grouper,fsi_grouper,
+258,ORM ESI,cpm_srvesi,ORM_DBG
+260,FSI ESO Server Load #6,fsi_srveso,listener6
+261,FSI ESO Server Load #7,fsi_srveso,listener7
+262,FSI ESO Server Load #8,fsi_srveso,listener8
+263,FSI ESO Server Load #9,fsi_srveso,listener9
+264,FSI ESO Server Load #10,fsi_srveso,listener10
+265,FSI ESO Server Load #11,fsi_srveso,listener11
+266,FSI ESO Server Load #12,fsi_srveso,listener12
+267,FSI ESO Server Load #13,fsi_srveso,listener13
+268,FSI ESO Server Load #14,fsi_srveso,listener14
+269,FSI ESO Server Load #15,fsi_srveso,listener15
+27,Queue Control Panel,,
+270,FSI Query Server,fsi_query,
+275,FSI ESO Notify Server,fsi_srvnotify,
+276,FSI Hold Release Server,fsi_srvhold,
+277,FSI Trigger Hold Server,fsi_srvtrighold,
+280,FSI ESO Server Load #1,fsi_srveso,listener1
+281,FSI ESO Server Load #2,fsi_srveso,listener2
+282,FSI ESO Server Load #3,fsi_srveso,listener3
+283,FSI ESO Server Load #4,fsi_srveso,listener4
+284,FSI ESO Server Load #5,fsi_srveso,listener5
+285,FSI ESO Server Batch #1,fsi_srveso,batch1
+286,FSI ESO Server Batch #2,fsi_srveso,batch2
+287,FSI ESO Server Batch #3,fsi_srveso,batch3
+288,FSI ESO Server Batch #4,fsi_srveso,batch4
+289,FSI ESO Server Batch #5,fsi_srveso,batch5
+29,MQ Alert Server,,
+290,FSI ESO Query Extract Server,fsi_srveso,fsi.eso_query
+291,FSI Batch CQM Server,fsi_srvcqm,batch
+292,FSI ESO OE Batch Server,fsi_srveso,oenbatch
+293,FSI ESO Server Query #1,fsi_srveso,query1
+294,FSI ESO Server Query #2,fsi_srveso,query2
+295,FSI ESO Server Query #3,fsi_srveso,query3
+296,FSI ESO Server Query #4,fsi_srveso,query4
+297,FSI ESO Server Query #5,fsi_srveso,query5
+298,FSI ESO Server Query #6,fsi_srveso,query6
+299,FSI ESO Server Query #7,fsi_srveso,query7
+30,Audit Management Server,srvauditmgr -args 300,
+300,FSI ESO Server Query #8,fsi_srveso,query8
+3001,CPM Script 3001,-offer -factor 1,cpmscript3001
+3002,CPM Script 3002,-offer -factor 1,cpmscript3002
+3003,CPM Script 3003,-offer -factor 1,cpmscript3003
+3005,Clinical Event Server For ESO,ocf_event_server,event3005
+301,FSI ESO Server Query #9,fsi_srveso,query9
+302,FSI ESO Server Query #10,fsi_srveso,query10
+3054,CPM DM Async Script7700,cpm_srvscripta,cpmscriptasync770
+3056,CPM Script010,-offer -factor 1,cpmscript010
+310,HEA Subscription Server,hea_subscriptionsrv_a,
+32,Security Master,master noaudit,
+320,CS Charging Async,cs_srvasync,
+3200,FSI ESO Server Load #16,fsi_srveso,listener16
+3201,FSI ESO Server Load #17,fsi_srveso,listener17
+3202,FSI ESO Server Load #18,fsi_srveso,listener18
+3203,FSI ESO Server Load #19,fsi_srveso,listener19
+3204,FSI ESO Server Load #20,fsi_srveso,listener20
+3205,FSI ESO Server Load #21,fsi_srveso,listener21
+3206,FSI ESO Server Load #22,fsi_srveso,listener22
+3207,FSI ESO Server Load #23,fsi_srveso,listener23
+3208,FSI ESO Server Load #24,fsi_srveso,listener24
+3209,FSI ESO Server Load #25,fsi_srveso,listener25
+3210,FSI ESO Server Load #26,fsi_srveso,listener26
+3211,FSI ESO Server Load #27,fsi_srveso,listener27
+3212,FSI ESO Server Load #28,fsi_srveso,listener28
+3213,FSI ESO Server Load #29,fsi_srveso,listener29
+3214,FSI ESO Server Load #30,fsi_srveso,listener30
+3215,FSI ESO Server Load #31,fsi_srveso,listener31
+3216,FSI ESO Server Load #32,fsi_srveso,listener32
+3217,FSI ESO Server Load #33,fsi_srveso,listener33
+3218,FSI ESO Server Load #34,fsi_srveso,listener34
+3219,FSI ESO Server Load #35,fsi_srveso,listener35
+322,CS Charging Sync,cs_srvsync,
+3220,FSI ESO Server Load #36,fsi_srveso,listener36
+3221,FSI ESO Server Load #37,fsi_srveso,listener37
+3222,FSI ESO Server Load #38,fsi_srveso,listener38
+3223,FSI ESO Server Load #39,fsi_srveso,listener39
+3224,FSI ESO Server Load #40,fsi_srveso,listener40
+3225,FSI ESO Server Load #41,fsi_srveso,listener41
+3226,FSI ESO Server Load #42,fsi_srveso,listener42
+3227,FSI ESO Server Load #43,fsi_srveso,listener43
+3228,FSI ESO Server Load #44,fsi_srveso,listener44
+3229,FSI ESO Server Load #45,fsi_srveso,listener45
+3230,FSI ESO Server Load #46,fsi_srveso,listener46
+3231,FSI ESO Server Load #47,fsi_srveso,listener47
+3232,FSI ESO Server Load #48,fsi_srveso,listener48
+3233,FSI ESO Server Load #49,fsi_srveso,listener49
+3234,FSI ESO Server Load #50,fsi_srveso,listener50
+3235,FSI ESO Server Load #51,fsi_srveso,listener51
+3236,FSI ESO Server Load #52,fsi_srveso,listener52
+3237,FSI ESO Server Load #53,fsi_srveso,listener53
+3238,FSI ESO Server Load #54,fsi_srveso,listener54
+3239,FSI ESO Server Load #55,fsi_srveso,listener55
+3240,FSI ESO Server Load #56,fsi_srveso,listener56
+3241,FSI ESO Server Load #57,fsi_srveso,listener57
+3242,FSI ESO Server Load #58,fsi_srveso,listener58
+3243,FSI ESO Server Load #59,fsi_srveso,listener59
+3244,FSI ESO Server Load #60,fsi_srveso,listener60
+3245,FSI ESO Server Load #61,fsi_srveso,listener61
+3246,FSI ESO Server Load #62,fsi_srveso,listener62
+3247,FSI ESO Server Load #63,fsi_srveso,listener63
+3248,FSI ESO Server Load #64,fsi_srveso,listener64
+3249,FSI ESO Server Load #65,fsi_srveso,listener65
+3250,FSI ESO Server Load #66,fsi_srveso,listener66
+3251,FSI ESO Server Load #67,fsi_srveso,listener67
+3252,FSI ESO Server Load #68,fsi_srveso,listener68
+3253,FSI ESO Server Load #69,fsi_srveso,listener69
+3254,FSI ESO Server Load #70,fsi_srveso,listener70
+3255,FSI ESO Server Load #71,fsi_srveso,listener71
+3256,FSI ESO Server Load #72,fsi_srveso,listener72
+3257,FSI ESO Server Load #73,fsi_srveso,listener73
+3258,FSI ESO Server Load #74,fsi_srveso,listener74
+3259,FSI ESO Server Load #75,fsi_srveso,listener75
+3260,FSI ESO Server Load #76,fsi_srveso,listener76
+3261,FSI ESO Server Load #77,fsi_srveso,listener77
+3262,FSI ESO Server Load #78,fsi_srveso,listener78
+3263,FSI ESO Server Load #79,fsi_srveso,listener79
+3264,FSI ESO Server Load #80,fsi_srveso,listener80
+3265,FSI ESO Server Load #81,fsi_srveso,listener81
+3266,FSI ESO Server Load #82,fsi_srveso,listener82
+3267,FSI ESO Server Load #83,fsi_srveso,listener83
+3268,FSI ESO Server Load #84,fsi_srveso,listener84
+3269,FSI ESO Server Load #85,fsi_srveso,listener85
+3270,FSI ESO Server Load #86,fsi_srveso,listener86
+3271,FSI ESO Server Load #87,fsi_srveso,listener87
+3272,FSI ESO Server Load #88,fsi_srveso,listener88
+3273,FSI ESO Server Load #89,fsi_srveso,listener89
+3274,FSI ESO Server Load #90,fsi_srveso,listener90
+3275,FSI ESO Server Load #91,fsi_srveso,listener91
+3276,FSI ESO Server Load #92,fsi_srveso,listener92
+3277,FSI ESO Server Load #93,fsi_srveso,listener93
+3278,FSI ESO Server Load #94,fsi_srveso,listener94
+3279,FSI ESO Server Load #95,fsi_srveso,listener95
+3280,FSI ESO Server Load #96,fsi_srveso,listener96
+3281,FSI ESO Server Load #97,fsi_srveso,listener97
+3282,FSI ESO Server Load #98,fsi_srveso,listener98
+3283,FSI ESO Server Load #99,fsi_srveso,listener99
+3284,FSI ESO Server Load #100,fsi_srveso,listener100
+33,Server Control Panel,,
+330,PM Reg,pm_srvreg,
+331,PM Utility,pm_srvutility,
+332,PM Transaction,pm_srvtransaction,
+335,PM Trans Async,pm_srvtransasync,
+34,Transaction Database Master,-master system cer_config/tdb_system.dat cer_config/tdb_system.jnl -cache 35000,
+340,PM Query,pm_srvquery,
+345,PM Reg Debug,pm_srvreg,pm.reg.debug
+35,Transaction Database Slave,-slave system cer_config/tdb_system_slave.dat -cache 35000,
+350,Enterprise Java Server Test,ejstest ejstestrdm,
+351,Order Management,ordersquery ordersmanagement ordersmanagementasync orderproposalmanagement erxroutinginfo,
+352,Clinical Information,clinical_event FamilyHistory documentation Subscription SubscriptionAsync ce_notify interpretations,
+353,Multimedia Agents,-agent QRScpServer ACS MPPSServer JobQueueEngine,
+354,Multimedia,studyvalidation MediaObjectManagement CAMM cammworkflow,
+3545,Clinical Event Server for History,ocf_event_server,CLINEVENT_ESIHIST
+355,Prescription Benefits,rxplanreltn benefittransactions,
+356,Clinical Reporting,reporttriggerqualifier,
+357,Privilege Authorization,MSVCAuthorization,
+358,Content Retrieval,content_retrieval clinicalcontext,
+359,Clinical Information (nomenclature),nomenclature location terminology_content_mapping,
+36,Shared Service Queue Administrator,,
+360,Health Expert,HealthExpert,
+361,Scheduling,Scheduling Appointment SchAutoMsg SchOrder SchRes SchSearch,
+362,Orders Support,ordersreference ordersscheduling frequencymatcher ordersdisplay,
+363,Domain Description,domaindescrip,
+364,Radiology,Radiology,
+365,PM Guidance,PMGuidance,
+366,Health Recommendations,recommendation recommendationchange invitation invitationchange immunization,
+367,Critical Outcomes,critical_outcomes critical_outcomesasync,
+368,Patient Accounting,Financials,
+369,Financial Clearance Transactions,AddressVerification MedicalEligibility,
+37,Authorize,,
+370,CernAdminMouvServer,CernAdminMouv,
+371,Specimen Container,SpecimenContainer SpecimenContainerAsync SpecimenCollections barcode_interpretation,
+372,Reference Code,ResultCode,
+373,Patient Demographics and Registration,Person Encounter RegistrationPostProcess AdmissionNotification PatientCase PayerAuthorization,
+374,Clinical Information (Clinical Fact),clinicalfact,
+375,KIA Event Server,kia_srvesunload,
+376,Blood Inventory Transfer Interface,BloodInventoryTransferInterface ProductStatus BloodQuery BloodProductStatusOutbound,
+377,PM Episode,PMEpisode ClockConfiguration,
+378,PowerPlans Server,powerplansasynchronous powerplansquery powerplansmaintain,
+379,LR Assumed,LRAssumed FgmInteraction PDSNominatedPharmacy,
+380,Spine Interaction,PdsInteraction LRSync LRAsync CpisInteraction,
+381,MSVC Agents,-agent ChargeCollectorAgent FutureOrderExpirationAgent OrderProposalExpirationAgent,
+382,Document Imaging,docimaging_access,
+383,Inventory Management,udimanagement inventorypreference inventoryworklist supplychainconcepts,
+384,nCode Proxy,ncodeproxy,
+385,Foreign System Interface Server,ExternalSystemsInbound BloodTrackProprietary,
+386,Medication Decision Support,doserangechecking medicationdecisionsupport,
+387,Millennium Identity Server,cerner_oauth_proxy identity_assertion identity_attributes multifactor_authentication_proxy authorization_proxy,
+388,XML Document Generator,XMLDocumentGeneratorSync XMLDocumentGeneratorAsync XMLExtractionSync XMLDynamicDocumentGeneratorSync,
+389,Dynamic Documentation,DynamicDoc Workflow Tag ClinNotes DocStructure Config GenerateDoc DocRetriever,
+39,Transaction Database Slave,-slave system cer_config/tdb_system_slave_2.dat -cache 35000,
+390,SurgiNet Perioperative Server,-agent SCIAgent,
+392,FSI Patient Registration,EnsurePerson EnsureEncounter,
+393,Discern Data Access,DiscernDataAccessServer DiscernAnalyticsAsynchServer,
+394,OEN Management Server,OenControl,
+395,CPOE Server,cpoequery cpoemaintain cpoeasynchronous,
+396,Inc Search (Medical Terminology) 1,icd9conditions icd10conditions mayo allergies allergiesHealthCheck vocab procedures proceduresConcept drgConcept,
+397,CareCompass,CareCompass,
+398,Care Management,CareManagement,
+40,CPM HTTP Proxy Server,cpm_srvhttpproxy,
+400,CPM Async Script 003,cpm_srvscripta,CpmScriptAsync003
+401,CPM Script Batch 002,-offer -factor 1,cpmscriptbatch002
+402,CPM Script Cache 004,cpm_srvcache,Cpm.ScriptCache004
+403,CPM Script Batch 003,-offer -factor 1,cpmscriptbatch003
+404,CPM Script007,-offer -factor 1,cpmscript007
+405,CPM Script (mPages Audit),-offer,cpmscript_mpage
+406,CPM Script Batch 005,-offer -factor 1,CPMScriptBatch005
+407,Ops Agent - Audit,ops_srvagent,OpsAgent001
+408,CPM Script008,,cpmscript008
+409,CPM Script Batch 006,-offer -factor 1,cpmscriptbatch006
+411,CPM Script011,-offer -factor 1,cpmscript011
+412,CPM Script Batch002,-offer -factor 1,cpmscriptbatch002
+413,CPM Script013,-offer -factor 1,cpmscript013
+414,Data Syndication Async,cpm_srvscripta,CpmScriptAsync014
+415,Data Syndication,-offer -factor 1,cpmscriptbatch015
+420,CPS SCD SERVER,cps_scdserver,
+421,CPS SCD REF SERVER,cps_scdrefserver,
+422,Inc Search (Medical Terminology) 2,dsm5conditions imo hli snomed problemsConcept,
+423,Inc Search (Medical Terminology) 3,,
+424,Inc Search (Medical Terminology) 4,,
+425,FRN Tracking View Server,frn_srvtrackingview,
+430,CPM Script (mPage Audit),-offer,cpmscript_mpage
+431,CPM Async Script Class 003,cpm_srvscripta,CpmScriptAsync003
+432,CPM Script007,,cpmscript007
+445,CPM Script Batch 001,-offer -factor 1,cpmscriptbatch001
+450,Powerchart Office Task Server,taskserver,
+451,Powerchart Office Task Server Async,,
+455,Health Expectation Server,healthexpserver,
+456,Health Expectation Batch Server,healthexpbatchserver,
+47,SRV RDM Test Server,srv_rdm_test_server,
+475,ProFit Transaction Server,pft_srvtrans,
+476,ProFit Billing Server,pft_srvbilling,
+477,Workflow Task Processing Server,wtp_srvtaskproc,
+48,SRVTest Server,srvtest_server,
+49,CPM Code Cache Refresh,,
+50,CPM Application Authorization,cpm_srvapp,
+501,RRD Dispatch Server,rrd_server,
+502,RRD Monitor Server,rrd_server2,
+504,Messaging Interoperability,InteropService ExternalService,
+505,CareAware Publisher,CareAwarePublisher,
+506,Incremental Search (Orders),orderssearchsuggest,
+507,ADM Utility,AutomatedDispensingMachineUtility,
+508,Document Transaction Server,RegisterOnDemandPerson ProvideAndRegisterDocument SiDocReplay,
+509,Clinical Information - Messaging,messaging messagingAsync messagingEprescribe messagingLegacyErx,
+51,CPM Script,-offer -factor 1,
+510,ADM MDBus Messaging Server,ADMMDBusMessaging,
+511,ABN,ABN,
+512,Document Transaction Server 2,ExternalDocument,
+513,Incremental Search (Clinical Events),EventSetIncrementalSearch,
+514,Cloud Alert Agent,-agent CloudAlertsAgent,
+515,Computer Assisted Coding,ComputerAssistedCoding,
+517,Lab Core Dictionary Agent,-agent CoreDictionariesAgent,
+518,External Document Parser/Consolidator,UDOParser UDOConsolidation ExternalDataAsync ExternalDataSync DocumentsValidation,
+519,Revenue Cycle Registration,Registration,
+52,CPM Code Cache Query,,
+520,ICD9 Interrogator,ICD9Interrogator,
+521,Auto Text Server,AutoText,
+522,SurgiNet eMAR Server,ProcessAdmin,
+523,Pharmacy Formula,formula,
+524,Certificate Management,certificate signature,
+526,Referral,Referral Referrals ReferralsAsync PracticeSite MsgCntrRecipient,
+527,Bedrock Server,PhysicianExperience PatientPortal ReferenceLabNetwork MultumContent HPDService ServiceUrlRetrievalService,
+528,Anatomic Pathology Server,AnatomicPathologyOutbound,
+529,Documentation Quality,diagnosisassistant documentqualityreview DQRInteraction,
+53,CPM Script Private,cpm_srvprivate,
+530,DAP Outcome Proxy,dap_outcomeproxy,
+531,CareConcepts,CareConcepts,
+532,CV.Discrete Data Writer,DiscreteDataWriter,
+533,Patient Accounting Logging,FinancialsLoggingAsync,
+534,Health Maintenance Agents,-agent HEAgent,
+535,MPages,MPagesUtilities,
+536,Clinical Information - Post-Processing,ceProcessAsync,
+537,Healthcare Directory,HealthcareDirectory,
+538,Pharmacy Process,workitem rxmedrequest rxverification rxordernotificationasync,
+539,Discern Ontology Agent,-agent ConceptMappingSynchronizerAgent DiscernOntologySynchronizerAgent,
+54,CPM Async Script,cpm_srvscripta,
+540,Condition Management,problemmigration,
+541,Physician Experience Config Mgnt,ConfigurationManagement,
+542,External Medication History,MedHistoryStatus MedHistoryAudit MedHistoryTransaction MedListAccess,
+543,Remote Proxy,http servicediscovery,
+544,Pharmacy Support,pharmacyclaim PharmacyDispenseGenerator rxwaste PharmacyDispenseGeneratorSync,
+545,Lab Core Integration Agent,-agent CoreIntegrationAgent,
+547,DAP Care Protocols Proxy,dap_careprotocolsproxy,
+548,ClinicalLeaderDashboard,GenericOrders ClinicalLeaderDashboard DischargeMedsRecColumn ActivitiesColumn GenericHighRisksColumn,
+549,Patient Timeline,ptl,
+55,CPM Process,cpm_srvprocess,
+550,Pharmacy Inpatient Claim,rxinpatientclaimasync,
+551,GLB Result,glb_srvresult,
+556,EEM Transaction Server,cpm_srveem,
+557,EEM UK Transaction Server,eem_srvtransuk,
+558,EEM Generic Transaction Server,eem_srvtransgen,
+56,CPM Script Batch,-offer -factor 1,CpmScriptBatch
+57,CPM Script Batch Priv,-offer,CpmScriptBatchP
+58,CPM Script (Read Only),-offer,cpmscript_discern
+580,Scheduling Sequencing Server,sch_srvsequence,
+581,Scheduling Security Server,sch_srvsecurity,
+582,Scheduling Flex Server,sch_srvflex,
+59,Entity Lock Server,cpm_srventitylock,
+60,CPM Service Resource Security,cpm_srvsrcache,
+601,Pharmacy Queue Server,1600,
+602,Pharmacy Queue Server,16001,
+607,Orders Search External Info,orderssearchexternalinfo,
+61,CPM Script001,,cpmscript001
+610,NHSN Reporting,XmlGenerationAndReporting,
+611,Infection Control Services,InfectionControl,
+612,User Roster Sync,-agent UserRosterSyncAgent,
+613,Bedrock Mill Services,RefMgmt BRDataRetrieval PBSMaint,
+614,Rehab Services,rehab,
+615,Medication Record,MedicationRecords,
+616,Clinical Assessments,ClinicalAssessments,
+617,History Management,family_hx_activity social_history,
+619,Discern Ontology,discernontologyfhirproxy discernontologymappingproxy,
+62,CPM Script002,,cpmscript002
+620,Patient Outcomes,Patient_Outcomes,
+621,FSI Utility,DocumentProcessing,
+622,Tissue Management,TissueManagement,
+623,Order Query,dailyreviewquery dailyreviewmanagement dailyreviewmanagementasync EcoQueueProcessor,
+624,Powerchart Interop,interop,
+625,Medication Dispense and Dose Server,pha_srvfilllist_s,
+626,Medication Fill/Report Server,pha_srvfilllist_s,phafilllist001
+627,Medication Fill/Report Server Async,pha_srvfilllist_a,
+63,CPM Script003,,cpmscript003
+630,Pharmacy Order Server,pha_srvorder,
+636,Retail Claim Server Async,rxa_srvclaimasync,
+637,Retail Claim Server Async001,rxa_srvclaimasync,RxaClaimAsync001
+64,CPM Script004,,cpmscript004
+640,Pharmacy Inbound Dispense Server,pha_srvinbounddispense_s,
+644,Foreign System Interface OenRouteService,OenRouteService,
+645,Pharmacy Utility Server,pha_srvutility_s,
+65,CPM Script005,,cpmscript005
+650,ProView Image Manager - Sweep Process,,
+651,Proview Image Manager - DICOM,,
+652,ProView CSA Server,pvw_im_csasrv,
+659,Ops Agent,ops_srvagent,
+66,CPM HNAM Agent,,
+67,CPM Async Script Class 001,cpm_srvscripta,CpmScriptAsync001
+68,CPM Script006,,cpmscript006
+70,CPM Audit Server,cpm_srvaudit,
+71,CPM Auditing Outbound Server,cpm_srvauditout,
+72,CPM Notify Server,,
+73,Time Repository Server,srvtimerepository,
+74,CpmScript Report (Read Only),-offer,cpmscript_report
+75,User Services,srvuser,
+76,System Management Agent,esm_srvagent,
+77,CPM Async Script Class 002,cpm_srvscripta,CpmScriptAsync002
+78,CPM Script Install,-offer -factor 1,CpmScriptInstall
+79,CPM Script (mPages),-offer,cpmscript_mpage
+80,CPM Script Cache,cpm_srvcache,
+81,CPM Script Cache 001,cpm_srvcache,Cpm.ScriptCache001
+82,CPM Script Cache 002,cpm_srvcache,Cpm.ScriptCache002
+83,CPM Script Cache 003,cpm_srvcache,Cpm.ScriptCache003
+84,CPM Async Script mPage,cpm_srvscripta,cpmscriptasync_mpage
+85,CPM Script Batch 002,,cpmscriptbatch002
+86,CPM Expedite,cpm_srvexpedite,
+90,DM Script Batch Async,cpm_srvscripta,cpmscriptasyncdm
+91,CPM Process 001,cpm_srvprocess,cpmprocess001
+92,OMF PowerVision Document Server,omf_srvpvdoc,
+93,CPM Async Script CIM,cpm_srvscripta,CPMAsyncScriptCIM

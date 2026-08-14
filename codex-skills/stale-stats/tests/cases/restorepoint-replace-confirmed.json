@@ -1,0 +1,5 @@
+{
+  "stale_stats_action": "replace-restorepoint",
+  "stale_stats_confirm_replace": true,
+  "test_restore_point_name": "ABL_RESTORE_POINT"
+}

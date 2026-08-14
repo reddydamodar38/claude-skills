@@ -1,0 +1,8 @@
+- name: Verify restore-point request validation
+  hosts: localhost
+  gather_facts: false
+  vars:
+    stale_stats_restore_point_effective: "{{ test_restore_point_name }}"
+  tasks:
+    - name: Run production restore-point validation
+      ansible.builtin.import_tasks: ../playbooks/tasks/validate-restorepoint-request.yml

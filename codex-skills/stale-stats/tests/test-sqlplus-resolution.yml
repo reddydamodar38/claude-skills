@@ -1,0 +1,13 @@
+- name: Verify production SQLPlus resolution on the database node
+  hosts: primaryDB
+  gather_facts: false
+  become: true
+  become_user: oracle
+  tasks:
+    - name: Run production SQLPlus resolution
+      ansible.builtin.import_tasks: ../playbooks/tasks/resolve-sqlplus.yml
+    - name: Assert SQLPlus was resolved
+      ansible.builtin.assert:
+        that:
+          - stale_stats_sqlplus_path.rc == 0
+          - stale_stats_sqlplus_path.stdout | trim | length > 0

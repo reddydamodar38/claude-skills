@@ -18,6 +18,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-RequiredEnvironmentValue {
+  param([Parameter(Mandatory=$true)][string]$Name)
+
+  $value = [Environment]::GetEnvironmentVariable($Name, "Process")
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    throw "Required environment variable '$Name' is not set."
+  }
+  return $value
+}
+
+$script:GatlingConfigPassword = Get-RequiredEnvironmentValue -Name "GATLING_CONFIG_PASSWORD"
+
 if ($TargetAlias -ieq "ablfhir") {
   if (-not $PSBoundParameters.ContainsKey("HostName")) { $HostName = "10.191.200.22" }
   if (-not $PSBoundParameters.ContainsKey("UserName")) { $UserName = "root" }
@@ -39,28 +51,29 @@ if (-not (Test-Path $scenarioDataPath)) { throw "Missing file: $scenarioDataPath
 $dbMatrix = @{
   "fpabl" = @{
     User = "v500"
-    Password = "CERner##_123ORA"
+    PasswordEnvironment = 'FPABL_DB_PASSWORD'
     Url = "10.37.163.164:1521/sfpabl.world"
   }
   "ablfhir" = @{
     User = "v500"
-    Password = "v500"
+    PasswordEnvironment = 'ABLFHIR_DB_PASSWORD'
     Url = "10.191.200.24:1521/sfpabl.world"
   }
   "fpabl-alt" = @{
     User = "v500"
-    Password = "CERner##_123ORA"
+    PasswordEnvironment = 'FPABL_ALT_DB_PASSWORD'
     Url = "10.37.163.164:1521/sfpabl.world"
   }
   "fpabl2" = @{
     User = "v500"
-    Password = "CERner##_123ORA"
+    PasswordEnvironment = 'FPABL2_DB_PASSWORD'
     Url = "10.37.163.164:1521/sfpabl.world"
   }
 }
 
 $db = $dbMatrix[$DbEnv]
 if ($null -eq $db) { throw "Unsupported DbEnv: $DbEnv" }
+$db["Password"] = Get-RequiredEnvironmentValue -Name $db.PasswordEnvironment
 
 $sqlplusScript = "C:/Users/prakash/.codex/skills/sqlplus/scripts/run_oracle_query.ps1"
 
@@ -231,6 +244,155 @@ function Escape-YamlDoubleQuoted {
   return (($Value -replace '\\', '\\\\') -replace '"', '\"')
 }
 
+function Normalize-DatePlaceholderQuotes {
+  param([string]$Value)
+  if ($null -eq $Value) { return "" }
+  $text = [string]$Value
+  # Normalize quoted date placeholders from generator output:
+  # "'{currentDate 15 Day}'" -> "{currentDate 15 Day}"
+  if ($text -match "^'\{currentDate[^}]*\}'$") {
+    return $text.Substring(1, $text.Length - 2)
+  }
+  return $text
+}
+
+function Get-MapKeyCaseInsensitive {
+  param(
+    [System.Collections.IDictionary]$Map,
+    [string]$LogicalKey
+  )
+  if ($null -eq $Map -or [string]::IsNullOrWhiteSpace($LogicalKey)) { return $null }
+  foreach ($k in $Map.Keys) {
+    if ($null -eq $k) { continue }
+    if ($k.ToString().ToLowerInvariant() -eq $LogicalKey.ToLowerInvariant()) {
+      return [string]$k
+    }
+  }
+  return $null
+}
+
+function Get-MapValueCaseInsensitive {
+  param(
+    [System.Collections.IDictionary]$Map,
+    [string]$LogicalKey
+  )
+  $actualKey = Get-MapKeyCaseInsensitive -Map $Map -LogicalKey $LogicalKey
+  if ($null -eq $actualKey) { return $null }
+  return [string]$Map[$actualKey]
+}
+
+function Replace-BytePatternInPlace {
+  param(
+    [byte[]]$Buffer,
+    [byte[]]$OldPattern,
+    [byte[]]$NewPattern
+  )
+  if ($null -eq $Buffer -or $null -eq $OldPattern -or $null -eq $NewPattern) { return 0 }
+  if ($OldPattern.Length -eq 0 -or $OldPattern.Length -ne $NewPattern.Length) { return 0 }
+  if ($Buffer.Length -lt $OldPattern.Length) { return 0 }
+
+  $replaceCount = 0
+  for ($i = 0; $i -le ($Buffer.Length - $OldPattern.Length); $i++) {
+    $matched = $true
+    for ($j = 0; $j -lt $OldPattern.Length; $j++) {
+      if ($Buffer[$i + $j] -ne $OldPattern[$j]) {
+        $matched = $false
+        break
+      }
+    }
+    if (-not $matched) { continue }
+    for ($j = 0; $j -lt $NewPattern.Length; $j++) {
+      $Buffer[$i + $j] = $NewPattern[$j]
+    }
+    $replaceCount++
+    $i += ($OldPattern.Length - 1)
+  }
+  return $replaceCount
+}
+
+function Find-PatternOffsets {
+  param(
+    [byte[]]$Buffer,
+    [byte[]]$Pattern
+  )
+  $hits = New-Object System.Collections.Generic.List[int]
+  if ($null -eq $Buffer -or $null -eq $Pattern) { return $hits }
+  if ($Pattern.Length -eq 0 -or $Buffer.Length -lt $Pattern.Length) { return $hits }
+  for ($i = 0; $i -le ($Buffer.Length - $Pattern.Length); $i++) {
+    $matched = $true
+    for ($j = 0; $j -lt $Pattern.Length; $j++) {
+      if ($Buffer[$i + $j] -ne $Pattern[$j]) {
+        $matched = $false
+        break
+      }
+    }
+    if ($matched) {
+      $hits.Add($i) | Out-Null
+      $i += ($Pattern.Length - 1)
+    }
+  }
+  return $hits
+}
+
+function Update-AppInfoUpdtIdPreserveBytes {
+  param(
+    [string]$AppInfoBase64,
+    [string]$OldUserId,
+    [string]$NewUserId
+  )
+
+  if ([string]::IsNullOrWhiteSpace($AppInfoBase64)) { return $AppInfoBase64 }
+  if ([string]::IsNullOrWhiteSpace($OldUserId) -or [string]::IsNullOrWhiteSpace($NewUserId)) { return $AppInfoBase64 }
+  if ($OldUserId -eq $NewUserId) { return $AppInfoBase64 }
+  if ($OldUserId.Length -ne $NewUserId.Length) {
+    Write-Warning "Skipping appinfo UPDT_ID byte-preserving update because old/new user_id lengths differ ($OldUserId -> $NewUserId)."
+    return $AppInfoBase64
+  }
+
+  try {
+    $rawBytes = [Convert]::FromBase64String($AppInfoBase64)
+  } catch {
+    Write-Warning "Skipping appinfo update because value is not valid base64."
+    return $AppInfoBase64
+  }
+
+  # appinfo payload is base64-encoded binary metadata; update only UPDT_ID value bytes.
+  $keyBytes = [System.Text.Encoding]::ASCII.GetBytes("UPDT_ID")
+  $oldAscii = [System.Text.Encoding]::ASCII.GetBytes($OldUserId)
+  $newAscii = [System.Text.Encoding]::ASCII.GetBytes($NewUserId)
+
+  $keyHits = Find-PatternOffsets -Buffer $rawBytes -Pattern $keyBytes
+  if ($keyHits.Count -eq 0) {
+    Write-Warning "appinfo does not contain UPDT_ID key marker; keeping original appinfo unchanged."
+    return $AppInfoBase64
+  }
+
+  $idHits = Find-PatternOffsets -Buffer $rawBytes -Pattern $oldAscii
+  if ($idHits.Count -eq 0) {
+    Write-Warning "No matching UPDT_ID byte pattern found inside appinfo; keeping original appinfo bytes unchanged."
+    return $AppInfoBase64
+  }
+
+  # Prefer the first user-id occurrence after the UPDT_ID key declaration area.
+  $replaceAt = -1
+  $lastKeyPos = $keyHits[$keyHits.Count - 1]
+  foreach ($hit in $idHits) {
+    if ($hit -gt $lastKeyPos) {
+      $replaceAt = $hit
+      break
+    }
+  }
+  if ($replaceAt -lt 0) {
+    $replaceAt = $idHits[0]
+  }
+
+  for ($i = 0; $i -lt $newAscii.Length; $i++) {
+    $rawBytes[$replaceAt + $i] = $newAscii[$i]
+  }
+
+  return [Convert]::ToBase64String($rawBytes)
+}
+
 function Get-ScenarioTransactionName {
   param([string]$Path, [string]$FallbackScenarioName)
   $raw = Get-Content -Raw $Path
@@ -372,12 +534,14 @@ function Build-FramedUserSql {
     [System.Collections.IDictionary]$ExistingGlobals
   )
 
+  $sqlSafePassword = $script:GatlingConfigPassword.Replace("'", "''")
+
   $exprMap = [ordered]@{
     "authority"                    = "'$Authority' AS authority"
     "username"                     = "username"
     "user_id"                      = "PERSON_ID AS user_id"
     "prsnl_id"                     = "PERSON_ID AS prsnl_id"
-    "password"                     = "'scale' AS password"
+    "password"                     = "'$sqlSafePassword' AS password"
     "current_dt_tm"                = "'{currentDateTime}' AS current_dt_tm"
     "current_dt_tm_pastnineyears"  = "'{currentDateTime -3285 Day}' AS current_dt_tm_PastNineYears"
   }
@@ -413,7 +577,7 @@ function Build-GlobalBlock {
   $lines.Add('- queryString: ""')
   $lines.Add("  params:")
   foreach ($k in $Params.Keys) {
-    $v = [string]$Params[$k]
+    $v = Normalize-DatePlaceholderQuotes -Value ([string]$Params[$k])
     $lines.Add('  - name: "' + (Escape-YamlDoubleQuoted $k) + '"')
     $lines.Add('    value: "' + (Escape-YamlDoubleQuoted $v) + '"')
   }
@@ -435,7 +599,7 @@ function Build-GlobalBlockFromDataSets {
     $lines.Add("  params:")
     foreach ($k in @($paramsMap.Keys)) {
       if ($null -eq $k) { continue }
-      $v = [string]$paramsMap[$k]
+      $v = Normalize-DatePlaceholderQuotes -Value ([string]$paramsMap[$k])
       $lines.Add('  - name: "' + (Escape-YamlDoubleQuoted $k) + '"')
       $lines.Add('    value: "' + (Escape-YamlDoubleQuoted $v) + '"')
     }
@@ -539,7 +703,8 @@ try {
           $allowedKeys = @($firstNewParams.Keys)
         }
       }
-      foreach ($newSet in $newSets) {
+      for ($newSetIdx = 0; $newSetIdx -lt $newSets.Count; $newSetIdx++) {
+        $newSet = $newSets[$newSetIdx]
         $mergedParams = [ordered]@{}
         $newSetParams = $newSet.Params
         if ($null -eq $newSetParams) { $newSetParams = [ordered]@{} }
@@ -565,8 +730,34 @@ try {
         foreach ($k in @($mergedParams.Keys)) {
           $lk = $k.ToLowerInvariant()
           if ($lk -eq "authority") { $mergedParams[$k] = "ablfhir" }
-          elseif ($lk -eq "password") { $mergedParams[$k] = "scale" }
+          elseif ($lk -eq "password") { $mergedParams[$k] = $script:GatlingConfigPassword }
           elseif ($lk -eq "current_dt_tm") { $mergedParams[$k] = "{currentDateTime}" }
+        }
+
+        # If appinfo already exists in current scenario-data, update only the embedded UPDT_ID bytes.
+        $appInfoKey = Get-MapKeyCaseInsensitive -Map $mergedParams -LogicalKey "appinfo"
+        if ($null -ne $appInfoKey) {
+          $oldRowParams = $null
+          if ($newSetIdx -lt $oldSets.Count -and $null -ne $oldSets[$newSetIdx]) {
+            $oldRowParams = $oldSets[$newSetIdx].Params
+          }
+          if ($null -eq $oldRowParams) {
+            $oldRowParams = $oldDefaultParams
+          }
+
+          $oldAppInfoValue = Get-MapValueCaseInsensitive -Map $oldRowParams -LogicalKey "appinfo"
+          if (-not [string]::IsNullOrWhiteSpace($oldAppInfoValue)) {
+            $oldUserIdForAppInfo = Get-MapValueCaseInsensitive -Map $oldRowParams -LogicalKey "user_id"
+            if ([string]::IsNullOrWhiteSpace($oldUserIdForAppInfo)) {
+              $oldUserIdForAppInfo = Get-MapValueCaseInsensitive -Map $oldDefaultParams -LogicalKey "user_id"
+            }
+            $newUserIdForAppInfo = Get-MapValueCaseInsensitive -Map $mergedParams -LogicalKey "user_id"
+            if (-not [string]::IsNullOrWhiteSpace($newUserIdForAppInfo)) {
+              $mergedParams[$appInfoKey] = Update-AppInfoUpdtIdPreserveBytes -AppInfoBase64 $oldAppInfoValue -OldUserId $oldUserIdForAppInfo -NewUserId $newUserIdForAppInfo
+            } else {
+              $mergedParams[$appInfoKey] = $oldAppInfoValue
+            }
+          }
         }
 
         $finalSets.Add([pscustomobject]@{

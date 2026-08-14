@@ -11,260 +11,20 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Get-LineCommentStart {
-  param([string]$Line, [int]$StartIndex)
-
-  $cursor = $StartIndex
-  while ($cursor -lt $Line.Length) {
-    $hit = $Line.IndexOf("//", $cursor)
-    if ($hit -lt 0) { return -1 }
-
-    $prefix = $Line.Substring(0, $hit)
-    if ($prefix.Trim().Length -eq 0) { return $hit }
-    if ($hit -gt 0 -and [char]::IsWhiteSpace($Line[$hit - 1])) { return $hit }
-
-    $cursor = $hit + 2
-  }
-
-  return -1
-}
-
-function Get-ActiveLineRecords {
-  param([string]$Path)
-
-  $lines = @(Get-Content -LiteralPath $Path)
-  $records = @()
-  $inBlockComment = $false
-
-  for ($i = 0; $i -lt $lines.Count; $i++) {
-    $line = [string]$lines[$i]
-    $active = ""
-    $cursor = 0
-
-    while ($cursor -lt $line.Length) {
-      if ($inBlockComment) {
-        $end = $line.IndexOf("*)", $cursor)
-        if ($end -lt 0) {
-          $cursor = $line.Length
-          break
-        }
-        $cursor = $end + 2
-        $inBlockComment = $false
-        continue
-      }
-
-      $blockStart = $line.IndexOf("(*", $cursor)
-      $slashStart = Get-LineCommentStart -Line $line -StartIndex $cursor
-      $dashStart = -1
-      if ($line.Substring($cursor).TrimStart().StartsWith("--")) {
-        $dashStart = $cursor + ($line.Substring($cursor).Length - $line.Substring($cursor).TrimStart().Length)
-      }
-
-      $commentStarts = @(@($blockStart, $slashStart, $dashStart) | Where-Object { $_ -ge 0 } | Sort-Object)
-      if ($commentStarts.Count -eq 0) {
-        $active += $line.Substring($cursor)
-        $cursor = $line.Length
-        break
-      }
-
-      $nextComment = [int]$commentStarts[0]
-      if ($nextComment -gt $cursor) {
-        $active += $line.Substring($cursor, $nextComment - $cursor)
-      }
-
-      if ($nextComment -eq $blockStart) {
-        $end = $line.IndexOf("*)", $nextComment + 2)
-        if ($end -lt 0) {
-          $inBlockComment = $true
-          $cursor = $line.Length
-        } else {
-          $cursor = $end + 2
-        }
-        continue
-      }
-
-      $cursor = $line.Length
-    }
-
-    $records += [pscustomobject]@{
-      LineNumber = $i + 1
-      Original = $line
-      Active = $active
-    }
-  }
-
-  return @($records)
-}
-
-function Test-RipgrepExecutable {
-  param([string]$Path)
-
-  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
-    return $false
-  }
-
-  try {
-    $null = & $Path --version 2>$null
-    return ($LASTEXITCODE -eq 0)
-  } catch {
-    return $false
-  }
-}
-
-function Resolve-OpenAiRipgrepPath {
-  $candidates = New-Object System.Collections.Generic.List[string]
-
-  $windowsApps = Join-Path $env:ProgramFiles "WindowsApps"
-  if (Test-Path -LiteralPath $windowsApps) {
-    Get-ChildItem -LiteralPath $windowsApps -Directory -Filter "OpenAI.Codex_*" -ErrorAction SilentlyContinue |
-      Sort-Object Name -Descending |
-      ForEach-Object {
-        $candidates.Add((Join-Path $_.FullName "app\resources\rg.exe"))
-      }
-  }
-
-  $extensionRoot = Join-Path $env:USERPROFILE ".vscode\extensions"
-  if (Test-Path -LiteralPath $extensionRoot) {
-    Get-ChildItem -LiteralPath $extensionRoot -Directory -Filter "openai.chatgpt-*-win32-x64" -ErrorAction SilentlyContinue |
-      Sort-Object Name -Descending |
-      ForEach-Object {
-        $candidates.Add((Join-Path $_.FullName "bin\windows-x86_64\rg.exe"))
-      }
-  }
-
-  foreach ($candidate in $candidates) {
-    if (Test-RipgrepExecutable -Path $candidate) {
-      return $candidate
-    }
-  }
-
-  return $null
-}
-
-$script:RipgrepPath = Resolve-OpenAiRipgrepPath
-
-function Invoke-OpenAiRipgrep {
-  param(
-    [string]$Pattern,
-    [string]$Path,
-    [switch]$IgnoreCase
-  )
-
-  if ([string]::IsNullOrWhiteSpace($script:RipgrepPath)) {
-    throw "No runnable OpenAI/Codex rg.exe was found."
-  }
-
-  $args = @("--line-number", "--no-heading", "--color", "never")
-  if ($IgnoreCase) { $args += "-i" }
-  $args += @("--", $Pattern, $Path)
-
-  try {
-    $hits = & $script:RipgrepPath @args 2>$null
-    $exitCode = $LASTEXITCODE
-  } catch {
-    throw ("OpenAI/Codex rg.exe failed to run: {0}" -f $_.Exception.Message)
-  }
-
-  if ($exitCode -eq 1) { return @() }
-  if ($exitCode -ne 0) {
-    throw ("OpenAI/Codex rg.exe failed for pattern '{0}' in '{1}' with exit code {2}." -f $Pattern, $Path, $exitCode)
-  }
-
-  return @($hits)
-}
-
 function Get-Count {
-  param(
-    [string]$Pattern,
-    [string]$Path,
-    [switch]$IncludeComments,
-    [switch]$IgnoreCase
-  )
-
-  return (@(Get-RgHits -Pattern $Pattern -Path $Path -IncludeComments:$IncludeComments -IgnoreCase:$IgnoreCase).Count)
+  param([string]$Pattern, [string]$Path)
+  $matches = rg -n $Pattern $Path 2>$null
+  if ($LASTEXITCODE -eq 1) { return 0 }
+  if ($LASTEXITCODE -ne 0) { throw "rg failed for pattern '$Pattern' in '$Path'" }
+  return (($matches | Measure-Object).Count)
 }
 
 function Get-RgHits {
-  param(
-    [string]$Pattern,
-    [string]$Path,
-    [switch]$IncludeComments,
-    [switch]$IgnoreCase
-  )
-
-  $options = [System.Text.RegularExpressions.RegexOptions]::None
-  if ($IgnoreCase) { $options = $options -bor [System.Text.RegularExpressions.RegexOptions]::IgnoreCase }
-  $rawHits = @(Invoke-OpenAiRipgrep -Pattern $Pattern -Path $Path -IgnoreCase:$IgnoreCase)
-  if ($IncludeComments) {
-    return @($rawHits)
-  }
-
-  $recordsByLine = @{}
-  foreach ($record in (Get-ActiveLineRecords -Path $Path)) {
-    $recordsByLine[[int]$record.LineNumber] = $record
-  }
-
-  $hits = @()
-  foreach ($rawHit in $rawHits) {
-    if ($rawHit -notmatch '^(?<line>\d+):') { continue }
-    $lineNumber = [int]$Matches["line"]
-    if (-not $recordsByLine.ContainsKey($lineNumber)) { continue }
-    $active = [string]$recordsByLine[$lineNumber].Active
-    if ([regex]::IsMatch($active, $Pattern, $options)) {
-      $hits += ("{0}:{1}" -f $lineNumber, $active.TrimEnd())
-    }
-  }
+  param([string]$Pattern, [string]$Path)
+  $hits = rg -n $Pattern $Path 2>$null
+  if ($LASTEXITCODE -eq 1) { return @() }
+  if ($LASTEXITCODE -ne 0) { throw "rg failed for pattern '$Pattern' in '$Path'" }
   return @($hits)
-}
-
-function Split-CsvFields {
-  param([string]$Line)
-
-  $fields = New-Object System.Collections.Generic.List[string]
-  $field = New-Object System.Text.StringBuilder
-  $inQuotes = $false
-
-  for ($i = 0; $i -lt $Line.Length; $i++) {
-    $char = $Line[$i]
-    if ($char -eq '"') {
-      if ($inQuotes -and ($i + 1) -lt $Line.Length -and $Line[$i + 1] -eq '"') {
-        [void]$field.Append('"')
-        $i++
-        continue
-      }
-      $inQuotes = -not $inQuotes
-      continue
-    }
-    if ($char -eq ',' -and -not $inQuotes) {
-      $fields.Add($field.ToString())
-      $field.Clear() | Out-Null
-      continue
-    }
-    [void]$field.Append($char)
-  }
-
-  $fields.Add($field.ToString())
-  return @($fields)
-}
-
-function Join-CsvFields {
-  param([string[]]$Fields)
-
-  if ($null -eq $Fields) { return "" }
-
-  $encoded = New-Object System.Collections.Generic.List[string]
-  foreach ($field in $Fields) {
-    $value = if ($null -eq $field) { "" } else { [string]$field }
-    $escaped = $value.Replace('"', '""')
-    $needsQuotes = $value.Contains(",") -or $value.Contains('"') -or $value.Contains("`r") -or $value.Contains("`n")
-    if ($needsQuotes) {
-      $encoded.Add(('"{0}"' -f $escaped))
-    } else {
-      $encoded.Add($escaped)
-    }
-  }
-
-  return ($encoded -join ",")
 }
 
 function Get-CsvInfo {
@@ -280,10 +40,10 @@ function Get-CsvInfo {
     }
   }
 
-  $lines = @(Get-Content -LiteralPath $Path)
+  $lines = Get-Content -LiteralPath $Path
   $headers = @()
   if ($lines.Count -gt 0) {
-    $headers = @(Split-CsvFields -Line $lines[0])
+    $headers = @($lines[0].Split(","))
   }
   $headerCount = $headers.Count
   $dataCount = [Math]::Max(0, $lines.Count - 1)
@@ -291,7 +51,7 @@ function Get-CsvInfo {
 
   if ($headerCount -gt 0 -and $dataCount -gt 0) {
     for ($i = 1; $i -lt $lines.Count; $i++) {
-      $valueCount = @(Split-CsvFields -Line $lines[$i]).Count
+      $valueCount = $lines[$i].Split(",").Count
       if ($valueCount -ne $headerCount) {
         $columnMismatch = $true
         break
@@ -322,7 +82,6 @@ function Test-WfTestCaseBodyIndentation {
   for ($i = 0; $i -lt $lines.Count; $i++) {
     $line = $lines[$i]
     $lineNumber = $i + 1
-
 
     if (-not $inCase) {
       if ($line -match '^(?<indent>[ \t]*)Run "CTX/AbilitiesCitrixMethods"\.wfTestCase\b') {
@@ -757,8 +516,6 @@ function Invoke-DataLoaderAutoFixes {
   $fedaActivated = @()
   $inDh2 = $false
   $inFeda = $false
-  $inPerfDataGuard = $false
-  $inFunctionalBranch = $false
   $appTokens = @{}
 
   foreach ($line in $lines) {
@@ -773,25 +530,8 @@ function Invoke-DataLoaderAutoFixes {
     $line = $lines[$i]
     $lineNumber = $i + 1
 
-    if ($line -match '^\s*If \(the number of keys in performance_data is 0\)\s*$') {
-      $inPerfDataGuard = $true
-      $inFunctionalBranch = $true
-      $inDh2 = $false
-      $inFeda = $false
-    } elseif ($inPerfDataGuard -and $line -match '^\s*Else\s*$') {
-      $inFunctionalBranch = $false
-      $inDh2 = $false
-      $inFeda = $false
-    } elseif ($inPerfDataGuard -and $line -match '^\s*End If\s*$') {
-      $inPerfDataGuard = $false
-      $inFunctionalBranch = $false
-      $inDh2 = $false
-      $inFeda = $false
-    }
-
-
-    if ($inFunctionalBranch -and $line -match '^\s*//\s*DH2 Credentials') { $inDh2 = $true; $inFeda = $false }
-    if ($inFunctionalBranch -and $line -match '^\s*//\s*SUT CREDs:\s*FEDA') { $inFeda = $true; $inDh2 = $false }
+    if ($line -match '^\s*//\s*DH2 Credentials') { $inDh2 = $true; $inFeda = $false }
+    if ($line -match '^\s*//\s*SUT CREDs:\s*FEDA') { $inFeda = $true; $inDh2 = $false }
 
     if ($line -match '^\s*Params platform, appDomainName, millenniumDomain\b' -or
         $line -match '^\s*if platform is empty then set platform to\b' -or
@@ -813,16 +553,16 @@ function Invoke-DataLoaderAutoFixes {
       $normalized += $lineNumber
     }
 
-    if ($inFunctionalBranch -and $inDh2 -and $line -match '^\s*Set\s+(sutUsername|sutPassword|citrixShortcut)\s*=') {
+    if ($inDh2 -and $line -match '^\s*Set\s+(sutUsername|sutPassword|citrixShortcut)\s*=') {
       $line = $line -replace '^(\s*)', '$1//'
       $dh2Commented += $lineNumber
     }
-    if ($inFunctionalBranch -and $inFeda -and $line -match '^\s*//\s*Set\s+(sutUsername|sutPassword|citrixShortcut)\s*=') {
+    if ($inFeda -and $line -match '^\s*//\s*Set\s+(sutUsername|sutPassword|citrixShortcut)\s*=') {
       $line = $line -replace '^(\s*)//\s*', '$1'
       $fedaActivated += $lineNumber
     }
 
-    if ($inFunctionalBranch -and $inDh2 -and $line -match '^\s*//\s*Set\s+citrixShortcut(?<idx>\d*)\s*=\s*"(?<value>[^"]*)"') {
+    if ($inDh2 -and $line -match '^\s*//\s*Set\s+citrixShortcut(?<idx>\d*)\s*=\s*"(?<value>[^"]*)"') {
       $idx = $Matches.idx
       if ([string]::IsNullOrWhiteSpace($idx)) { $idx = "" }
       $existingValue = $Matches.value
@@ -839,7 +579,7 @@ function Invoke-DataLoaderAutoFixes {
       $line = [regex]::Replace($line, '"[^"]*"\s*$', ('"' + $mapped + '"'))
     }
 
-    if ($inFunctionalBranch -and $inFeda -and $line -match '^\s*Set\s+citrixShortcut(?<idx>\d*)\s*=\s*"(?<value>[^"]*)"') {
+    if ($inFeda -and $line -match '^\s*Set\s+citrixShortcut(?<idx>\d*)\s*=\s*"(?<value>[^"]*)"') {
       $idx = $Matches.idx
       if ([string]::IsNullOrWhiteSpace($idx)) { $idx = "" }
       $existingValue = $Matches.value
@@ -876,142 +616,11 @@ function Invoke-DataLoaderAutoFixes {
 function Get-LoaderDefaultValue {
   param([string]$Path, [string]$VariableName)
   $pattern = '^\s*Set\s+' + [regex]::Escape($VariableName) + '\s*=\s*"(?<value>[^"]*)"'
-  foreach ($record in (Get-ActiveLineRecords -Path $Path)) {
-    if ($record.Active -match $pattern) { return $Matches["value"] }
+  $lines = Get-Content -LiteralPath $Path
+  foreach ($line in $lines) {
+    if ($line -match $pattern) { return $Matches.value }
   }
   return ""
-}
-
-function Get-LoaderMillCredentialDefaults {
-  param([string]$Path)
-
-  $map = [ordered]@{}
-  if (-not (Test-Path -LiteralPath $Path)) { return $map }
-
-  foreach ($record in (Get-ActiveLineRecords -Path $Path)) {
-    if ($record.Active -match '^\s*Set\s+(?<name>millUsername\d*)\s*=\s*"(?<value>[^"]*)"') {
-      $name = $Matches["name"]
-      if (-not $map.Contains($name)) {
-        $map[$name] = $Matches["value"]
-      }
-    }
-  }
-
-  if ($map.Count -eq 0) {
-    $millUsername = Get-LoaderDefaultValue -Path $Path -VariableName "millUsername"
-    if (-not [string]::IsNullOrWhiteSpace($millUsername)) {
-      $map["millUsername"] = $millUsername
-    }
-  }
-
-  $millPassword = Get-LoaderDefaultValue -Path $Path -VariableName "millPassword"
-  if (-not [string]::IsNullOrWhiteSpace($millPassword)) {
-    $map["millPassword"] = $millPassword
-  }
-
-  return $map
-}
-
-function Get-LoaderFinDefaults {
-  param([string]$Path)
-
-  $finMap = [ordered]@{}
-  if (-not (Test-Path -LiteralPath $Path)) { return $finMap }
-
-  foreach ($record in (Get-ActiveLineRecords -Path $Path)) {
-    if ($record.Active -match '^\s*Set\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"(?<value>[^"]*)"') {
-      $name = $Matches["name"]
-      $value = $Matches["value"]
-      if ($name -imatch 'fin' -and -not $finMap.Contains($name)) {
-        $finMap[$name] = $value
-      }
-    }
-  }
-
-  return $finMap
-}
-
-function Sync-CsvValues {
-  param(
-    [string]$Path,
-    [System.Collections.IDictionary]$ValuesByHeader
-  )
-
-  if ($null -eq $ValuesByHeader -or $ValuesByHeader.Count -eq 0) {
-    return [pscustomobject]@{
-      Path = $Path
-      UpdatedLines = @()
-      Headers = @()
-      Applied = $false
-    }
-  }
-
-  $headers = @()
-  $values = @()
-  if (Test-Path -LiteralPath $Path) {
-    $existing = @(Get-Content -LiteralPath $Path)
-    if ($existing.Count -gt 0) { $headers = @(Split-CsvFields -Line $existing[0]) }
-    if ($existing.Count -gt 1) { $values = @(Split-CsvFields -Line $existing[1]) }
-  }
-
-  if ($headers.Count -eq 0) {
-    $headers = @($ValuesByHeader.Keys)
-    $values = @()
-  }
-
-  $headerIndex = @{}
-  for ($i = 0; $i -lt $headers.Count; $i++) {
-    $headerIndex[$headers[$i]] = $i
-  }
-
-  foreach ($key in $ValuesByHeader.Keys) {
-    if (-not $headerIndex.ContainsKey($key)) {
-      $headerIndex[$key] = $headers.Count
-      $headers += $key
-    }
-  }
-
-  $normalizedValues = New-Object System.Collections.Generic.List[string]
-  for ($i = 0; $i -lt $headers.Count; $i++) {
-    if ($i -lt $values.Count) { $normalizedValues.Add([string]$values[$i]) }
-    else { $normalizedValues.Add('') }
-  }
-
-  foreach ($key in $ValuesByHeader.Keys) {
-    $idx = [int]$headerIndex[$key]
-    $normalizedValues[$idx] = [string]$ValuesByHeader[$key]
-  }
-
-  $content = @(
-    (Join-CsvFields -Fields $headers),
-    (Join-CsvFields -Fields @($normalizedValues))
-  )
-  Set-Content -LiteralPath $Path -Value $content -Encoding Default
-
-  return [pscustomobject]@{
-    Path = $Path
-    UpdatedLines = @(1,2)
-    Headers = @($ValuesByHeader.Keys)
-    Applied = $true
-  }
-}
-
-function Ensure-WorkflowCsvFinValues {
-  param(
-    [string]$Path,
-    [System.Collections.IDictionary]$FinDefaults
-  )
-
-  if ($null -eq $FinDefaults -or $FinDefaults.Count -eq 0) {
-    return [pscustomobject]@{
-      Path = $Path
-      UpdatedLines = @()
-      Headers = @()
-      Applied = $false
-    }
-  }
-
-  return Sync-CsvValues -Path $Path -ValuesByHeader $FinDefaults
 }
 
 function Ensure-CsvFromHeadersAndValues {
@@ -1021,8 +630,8 @@ function Ensure-CsvFromHeadersAndValues {
     [string[]]$Values
   )
   $content = @(
-    (Join-CsvFields -Fields $Headers),
-    (Join-CsvFields -Fields $Values)
+    ($Headers -join ","),
+    ($Values -join ",")
   )
   Set-Content -LiteralPath $Path -Value $content -Encoding Default
   return [pscustomobject]@{
@@ -1031,71 +640,7 @@ function Ensure-CsvFromHeadersAndValues {
   }
 }
 
-function Get-NormalizedWorkflowName {
-  param([string]$Name)
-  if ([string]::IsNullOrWhiteSpace($Name)) { return $Name }
-  return ([regex]::Replace($Name.Trim(), '\s+', '-'))
-}
-
-function Rename-AssociatedWorkflowFiles {
-  param(
-    [string]$Root,
-    [string]$OriginalWorkflow,
-    [string]$NormalizedWorkflow
-  )
-
-  $renamed = @()
-  if ([string]::IsNullOrWhiteSpace($OriginalWorkflow) -or $OriginalWorkflow -eq $NormalizedWorkflow) {
-    return [pscustomobject]@{
-      Workflow = $NormalizedWorkflow
-      Renamed = @()
-    }
-  }
-
-  $pairs = @(
-    [pscustomobject]@{
-      Old = Join-Path $Root ("Scripts\{0}.script" -f $OriginalWorkflow)
-      New = Join-Path $Root ("Scripts\{0}.script" -f $NormalizedWorkflow)
-    },
-    [pscustomobject]@{
-      Old = Join-Path $Root ("Scripts\DataLoader\{0}_DataLoader.script" -f $OriginalWorkflow)
-      New = Join-Path $Root ("Scripts\DataLoader\{0}_DataLoader.script" -f $NormalizedWorkflow)
-    },
-    [pscustomobject]@{
-      Old = Join-Path $Root ("Resources\{0}_LoginData.csv" -f $OriginalWorkflow)
-      New = Join-Path $Root ("Resources\{0}_LoginData.csv" -f $NormalizedWorkflow)
-    },
-    [pscustomobject]@{
-      Old = Join-Path $Root ("Resources\{0}_WorkflowData.csv" -f $OriginalWorkflow)
-      New = Join-Path $Root ("Resources\{0}_WorkflowData.csv" -f $NormalizedWorkflow)
-    }
-  )
-
-  foreach ($pair in $pairs) {
-    if (-not (Test-Path -LiteralPath $pair.Old)) { continue }
-    if ($pair.Old -eq $pair.New) { continue }
-    if (Test-Path -LiteralPath $pair.New) {
-      throw ("Cannot normalize workflow filename from '{0}' to '{1}' because destination already exists: {2}" -f $OriginalWorkflow, $NormalizedWorkflow, $pair.New)
-    }
-    Rename-Item -LiteralPath $pair.Old -NewName (Split-Path -Leaf $pair.New)
-    $renamed += [pscustomobject]@{
-      Old = $pair.Old
-      New = $pair.New
-    }
-  }
-
-  return [pscustomobject]@{
-    Workflow = $NormalizedWorkflow
-    Renamed = @($renamed)
-  }
-}
-
 $root = (Resolve-Path -LiteralPath $SuiteRoot).Path
-$requestedWorkflow = $Workflow
-$normalizedWorkflow = Get-NormalizedWorkflowName -Name $Workflow
-$workflowRenameInfo = Rename-AssociatedWorkflowFiles -Root $root -OriginalWorkflow $requestedWorkflow -NormalizedWorkflow $normalizedWorkflow
-$Workflow = $workflowRenameInfo.Workflow
-$workflowRenamedPaths = @($workflowRenameInfo.Renamed)
 $skillRoot = Split-Path -Parent $PSScriptRoot
 $ablfhirMapCsv = Join-Path $skillRoot "ABLFHIR_CitrixShortcuts.csv"
 $ablfedaMapCsv = Join-Path $skillRoot "ABLFEDA_CitrixShortcuts.csv"
@@ -1128,27 +673,30 @@ if ($ConversionMode -eq "On") {
   $loaderFixes = Invoke-DataLoaderAutoFixes -Path $dataLoaderPath -Dh2ShortcutMap $dh2ShortcutMap -FedaShortcutMap $fedaShortcutMap
 
   if (Test-Path -LiteralPath $dataLoaderPath) {
-    $millDefaults = Get-LoaderMillCredentialDefaults -Path $dataLoaderPath
-    $finDefaults = Get-LoaderFinDefaults -Path $dataLoaderPath
+    $mill1 = Get-LoaderDefaultValue -Path $dataLoaderPath -VariableName "millUsername1"
+    $mill2 = Get-LoaderDefaultValue -Path $dataLoaderPath -VariableName "millUsername2"
+    $millPass = Get-LoaderDefaultValue -Path $dataLoaderPath -VariableName "millPassword"
+    $fin = Get-LoaderDefaultValue -Path $dataLoaderPath -VariableName "FIN_HospitalistCC"
+    $shortcut = Get-LoaderDefaultValue -Path $dataLoaderPath -VariableName "citrixShortcut"
 
-    $loginCsvFix = Sync-CsvValues -Path $loginCsv -ValuesByHeader $millDefaults
-    if ($loginCsvFix.Applied) {
-      $csvFixes += $loginCsvFix
-    }
-    $workflowCsvFix = Ensure-WorkflowCsvFinValues -Path $workflowCsv -FinDefaults $finDefaults
-    if ($workflowCsvFix.Applied) {
-      $csvFixes += $workflowCsvFix
-    }
+    $csvFixes += Ensure-CsvFromHeadersAndValues -Path $loginCsv -Headers @("millUsername1","millPassword","millUsername2") -Values @($mill1,$millPass,$mill2)
+    $csvFixes += Ensure-CsvFromHeadersAndValues -Path $workflowCsv -Headers @("FIN_HospitalistCC","PowerChart") -Values @($fin,$shortcut)
   }
 }
 
 $legacyPattern = "StartMovie|StopMovie|dismissRulesOfRoad|selectPlatform|loginExe|Params platform|appDomainName|millenniumDomain|beginScript|endScript|LogSuccess|Set common to JSONValue|Set testData to JSONValue|set the remoteworkinterval to 2|set CitrixCredentials to ""UTIL/Credential""\.retrieveCredential|if Platform is empty then set platform to platform|cleanupSelectedPlatform platform"
-$legacyHits = @(Get-RgHits -Pattern $legacyPattern -Path $scriptPath)
+$legacyHits = rg -n $legacyPattern $scriptPath 2>$null
+if ($LASTEXITCODE -eq 1) { $legacyHits = @() }
+elseif ($LASTEXITCODE -ne 0) { throw "rg failed during legacy scan." }
 
 $spellingPattern = "\bSerachRectangle\b"
-$spellingHits = @(Get-RgHits -Pattern $spellingPattern -Path $scriptPath -IgnoreCase)
+$spellingHits = rg -n -i $spellingPattern $scriptPath 2>$null
+if ($LASTEXITCODE -eq 1) { $spellingHits = @() }
+elseif ($LASTEXITCODE -ne 0) { throw "rg failed during spelling scan." }
 $topLefPattern = 'SearchRectangle:\s*"UTIL/Screen"\.TopLef\b'
-$topLefHits = @(Get-RgHits -Pattern $topLefPattern -Path $scriptPath)
+$topLefHits = rg -n $topLefPattern $scriptPath 2>$null
+if ($LASTEXITCODE -eq 1) { $topLefHits = @() }
+elseif ($LASTEXITCODE -ne 0) { throw "rg failed during TopLef scan." }
 $separatorIssues = @(Test-MalformedSeparatorComments -Path $scriptPath)
 $wfBodyIndentIssues = @(Test-WfTestCaseBodyIndentation -Path $scriptPath)
 $ifElseIndentIssues = @(Test-IfElseIndentationInWfTestCase -Path $scriptPath)
@@ -1162,7 +710,7 @@ $altKeyHits = @(Get-RgHits -Pattern 'TypeText altKey' -Path $scriptPath)
 $tKeyHits = @(Get-RgHits -Pattern 'TypeText "t"' -Path $scriptPath)
 $fKeyHits = @(Get-RgHits -Pattern 'TypeText "f"' -Path $scriptPath)
 $xKeyHits = @(Get-RgHits -Pattern 'TypeText "x"' -Path $scriptPath)
-$scriptContentLines = @((Get-ActiveLineRecords -Path $scriptPath) | Select-Object -ExpandProperty Active)
+$scriptContentLines = Get-Content -LiteralPath $scriptPath
 $testCaseNameHits = @($scriptContentLines | Where-Object { $_ -match ('^\s*TEST CASE NAME:\s*' + [regex]::Escape($Workflow) + '\s*$') })
 $wfNameHits = @($scriptContentLines | Where-Object { $_ -match ('^\s*Set wfName = "' + [regex]::Escape($Workflow) + '"\s*$') })
 
@@ -1176,8 +724,8 @@ $loaderIfElseGuardOk = $false
 
 if (-not $dataLoaderMissing) {
   $loaderLegacyHits = @(Get-RgHits -Pattern $loaderLegacyPattern -Path $dataLoaderPath)
-  $loaderDh2Commented = ((Get-Count -Pattern '^\s*//\s*Set\s+sutUsername\s*=' -Path $dataLoaderPath -IncludeComments) -gt 0) -and `
-                        ((Get-Count -Pattern '^\s*//\s*Set\s+sutPassword\s*=' -Path $dataLoaderPath -IncludeComments) -gt 0)
+  $loaderDh2Commented = ((Get-Count -Pattern '^\s*//\s*Set\s+sutUsername\s*=' -Path $dataLoaderPath) -gt 0) -and `
+                        ((Get-Count -Pattern '^\s*//\s*Set\s+sutPassword\s*=' -Path $dataLoaderPath) -gt 0)
   $loaderFedaActive = ((Get-Count -Pattern '^\s*Set\s+sutUsername\s*=' -Path $dataLoaderPath) -gt 0) -and `
                       ((Get-Count -Pattern '^\s*Set\s+sutPassword\s*=' -Path $dataLoaderPath) -gt 0)
   $loaderPerformanceHits += @(Get-RgHits -Pattern 'Put performance_data\.sutUsername' -Path $dataLoaderPath)
@@ -1203,8 +751,7 @@ $wfTestCaseCount = Get-Count -Pattern "wfTestCase" -Path $scriptPath
 $endTestCaseCount = Get-Count -Pattern "EndTestCase wfStep" -Path $scriptPath
 $catchCount = Get-Count -Pattern "catch exception" -Path $scriptPath
 $scaleRecoveryCount = Get-Count -Pattern "ScaleRecovery" -Path $scriptPath
-$scriptRecords = @(Get-ActiveLineRecords -Path $scriptPath)
-$scriptLines = @($scriptRecords | Select-Object -ExpandProperty Active)
+$scriptLines = Get-Content -LiteralPath $scriptPath
 $scaleRecoveryAll = @()
 $scaleRecoveryPreCatch = @()
 $scaleRecoveryInCatch = @()
@@ -1247,14 +794,6 @@ $failed = $false
 $verboseFailures = ($FailureMode -eq "Verbose")
 
 Write-Host "Workflow: $Workflow"
-if ($requestedWorkflow -ne $Workflow) {
-  Write-Host ("[CONVERT] Normalized workflow filename spaces to hyphens: '{0}' -> '{1}'." -f $requestedWorkflow, $Workflow)
-  if ($workflowRenamedPaths.Count -gt 0) {
-    foreach ($item in $workflowRenamedPaths) {
-      Write-Host ("[CONVERT] Renamed associated file: {0} -> {1}" -f $item.Old, $item.New)
-    }
-  }
-}
 Write-Host "Script: $scriptPath"
 Write-Host ("ConversionMode={0}" -f $ConversionMode)
 Write-Host ""
@@ -1417,12 +956,11 @@ if ($captureHits.Count -gt 0) {
   $captureOutsideCatch = @()
   $inCatch = $false
   $lines = Get-Content -LiteralPath $scriptPath
-  $activeRecords = @(Get-ActiveLineRecords -Path $scriptPath)
   for ($i = 0; $i -lt $lines.Count; $i++) {
-    $trim = $activeRecords[$i].Active.Trim()
+    $trim = $lines[$i].Trim()
     if ($trim -match '^catch\s+exception\b') { $inCatch = $true }
     if ($trim -match '^end\s+try\b') { $inCatch = $false }
-    if ($activeRecords[$i].Active -match 'CaptureScreen' -and -not $inCatch) {
+    if ($lines[$i] -match 'CaptureScreen' -and -not $inCatch) {
       $captureOutsideCatch += ($i + 1)
     }
   }

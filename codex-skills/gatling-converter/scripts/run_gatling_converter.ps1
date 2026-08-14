@@ -25,6 +25,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-RequiredEnvironmentValue {
+  param([Parameter(Mandatory=$true)][string]$Name)
+
+  $value = [Environment]::GetEnvironmentVariable($Name, "Process")
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    throw "Required environment variable '$Name' is not set."
+  }
+  return $value
+}
+
+$script:GatlingConfigPassword = Get-RequiredEnvironmentValue -Name "GATLING_CONFIG_PASSWORD"
+
 function Assert-CommandAvailable {
   param([string]$Name)
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
@@ -359,7 +371,7 @@ function Ensure-ScenarioDataGlobalParams {
   param(
     [string]$ScenarioDataPath,
     [string]$DefaultAuthority = "MillDomain",
-    [string]$DefaultPassword = "scale",
+    [string]$DefaultPassword = $script:GatlingConfigPassword,
     [string]$DefaultUsername = ""
   )
   if (-not (Test-Path $ScenarioDataPath)) { return }
@@ -1405,8 +1417,8 @@ function Convert-RecordingRemote {
     "-jar", $ConverterJar,
     "-input", $localInputForConverter,
     "-output", $localOutputRoot,
-    "-password", '${password}',
-    "-authority", '${authority}',
+    "-p", '${password}',
+    "-a", '${authority}',
     "-request-format", "YAML",
     "-reply-format", "YAML",
     "-time-zone", $TimeZone,
@@ -1420,7 +1432,6 @@ function Convert-RecordingRemote {
     Write-Host "Skipping workflow-converter username argument because multiple explicit username_* overrides were supplied."
   }
   if ($combineCount -gt 1) {
-    $converterArgs += "--combine"
   }
   if (-not [string]::IsNullOrWhiteSpace($MoveToGlobal)) {
     $converterArgs += @("--move-to-global", $MoveToGlobal)
@@ -1477,7 +1488,7 @@ function Prepare-RunnerScenario {
       @"
 authority: $TargetAlias
 username: SYSTEM
-password: system
+password: $script:GatlingConfigPassword
 verboseLogging: true
 "@ | Set-Content -Path (Join-Path $dir "config.yaml")
     }
@@ -1487,7 +1498,7 @@ verboseLogging: true
     if ($DerivedIdentityMap -and $DerivedIdentityMap.Contains("username")) {
       $preferredUsername = [string]$DerivedIdentityMap["username"]
     }
-    Ensure-ScenarioDataGlobalParams -ScenarioDataPath $targetScenarioData -DefaultAuthority "MillDomain" -DefaultPassword "scale" -DefaultUsername $preferredUsername
+    Ensure-ScenarioDataGlobalParams -ScenarioDataPath $targetScenarioData -DefaultAuthority "MillDomain" -DefaultPassword $script:GatlingConfigPassword -DefaultUsername $preferredUsername
   }
   return $runnerDir
 }
@@ -2471,5 +2482,3 @@ if (-not $SkipGatlingRun) {
 
 Write-Host ""
 Write-Host "Completed."
-
-

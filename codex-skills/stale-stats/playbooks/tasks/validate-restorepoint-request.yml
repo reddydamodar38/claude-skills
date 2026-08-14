@@ -1,0 +1,9 @@
+- name: Validate restore-point request
+  ansible.builtin.assert:
+    that:
+      - stale_stats_action in ['restorepoint', 'replace-restorepoint']
+      - stale_stats_restore_point_effective is match('^[A-Za-z][A-Za-z0-9_$#]*$')
+      - stale_stats_action != 'replace-restorepoint' or (stale_stats_confirm_replace | default(false) | bool)
+    fail_msg: >-
+      Restore-point actions require a safe Oracle identifier. Replacement also
+      requires stale_stats_confirm_replace=true.

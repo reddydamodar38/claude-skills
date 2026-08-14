@@ -18,7 +18,6 @@ It mirrors the same run model and uses `docker run`.
 ## Remote Target Defaults
 - Default remote host: `10.191.205.92`
 - Built-in host alias: `fhirinj01` -> `10.191.205.92`
-- Default remote user: `root`
 - Default SUT domain profile: `ABLA`
 - ABLA profile defaults: `sutHost=dh2vablasut02.dh2.cerner.com` and ABLA-specific Citrix launch URL preference
 - FHIR profile defaults: `sutHost=DH2VFHIRSUT01.DH2.cerner.com` and FHIR-specific Citrix launch URL preference

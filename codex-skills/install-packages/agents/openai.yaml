@@ -1,0 +1,4 @@
+interface:
+  display_name: "Install Packages"
+  short_description: "Run EMPlus package install plans"
+  default_prompt: "Help me install EMPlus packages for an environment."

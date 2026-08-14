@@ -1,0 +1,4 @@
+interface:
+  display_name: "Back-End Report"
+  short_description: "Build validated back-end run comparisons"
+  default_prompt: "Use $back-end-report to inventory, parse, assess, validate, and compare baseline and current ABLCAPUTIL run paths, producing canonical JSON and Excel when available."

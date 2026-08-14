@@ -18,6 +18,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-RequiredEnvironmentValue {
+  param([Parameter(Mandatory=$true)][string]$Name)
+
+  $value = [Environment]::GetEnvironmentVariable($Name, "Process")
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    throw "Required environment variable '$Name' is not set."
+  }
+  return $value
+}
+
+$script:GatlingConfigPassword = Get-RequiredEnvironmentValue -Name "GATLING_CONFIG_PASSWORD"
+
 if ($TargetAlias -ieq "ablfhir") {
   if (-not $PSBoundParameters.ContainsKey("HostName")) { $HostName = "10.191.200.22" }
   if (-not $PSBoundParameters.ContainsKey("UserName")) { $UserName = "root" }
@@ -39,28 +51,29 @@ if (-not (Test-Path $scenarioDataPath)) { throw "Missing file: $scenarioDataPath
 $dbMatrix = @{
   "fpabl" = @{
     User = "v500"
-    Password = "CERner##_123ORA"
+    PasswordEnvironment = 'FPABL_DB_PASSWORD'
     Url = "10.37.163.164:1521/sfpabl.world"
   }
   "ablfhir" = @{
     User = "v500"
-    Password = "v500"
+    PasswordEnvironment = 'ABLFHIR_DB_PASSWORD'
     Url = "10.191.200.24:1521/sfpabl.world"
   }
   "fpabl-alt" = @{
     User = "v500"
-    Password = "CERner##_123ORA"
+    PasswordEnvironment = 'FPABL_ALT_DB_PASSWORD'
     Url = "10.37.163.164:1521/sfpabl.world"
   }
   "fpabl2" = @{
     User = "v500"
-    Password = "CERner##_123ORA"
+    PasswordEnvironment = 'FPABL2_DB_PASSWORD'
     Url = "10.37.163.164:1521/sfpabl.world"
   }
 }
 
 $db = $dbMatrix[$DbEnv]
 if ($null -eq $db) { throw "Unsupported DbEnv: $DbEnv" }
+$db["Password"] = Get-RequiredEnvironmentValue -Name $db.PasswordEnvironment
 
 $sqlplusScript = "C:/Users/prakash/.codex/skills/sqlplus/scripts/run_oracle_query.ps1"
 
@@ -521,12 +534,14 @@ function Build-FramedUserSql {
     [System.Collections.IDictionary]$ExistingGlobals
   )
 
+  $sqlSafePassword = $script:GatlingConfigPassword.Replace("'", "''")
+
   $exprMap = [ordered]@{
     "authority"                    = "'$Authority' AS authority"
     "username"                     = "username"
     "user_id"                      = "PERSON_ID AS user_id"
     "prsnl_id"                     = "PERSON_ID AS prsnl_id"
-    "password"                     = "'scale' AS password"
+    "password"                     = "'$sqlSafePassword' AS password"
     "current_dt_tm"                = "'{currentDateTime}' AS current_dt_tm"
     "current_dt_tm_pastnineyears"  = "'{currentDateTime -3285 Day}' AS current_dt_tm_PastNineYears"
   }
@@ -715,7 +730,7 @@ try {
         foreach ($k in @($mergedParams.Keys)) {
           $lk = $k.ToLowerInvariant()
           if ($lk -eq "authority") { $mergedParams[$k] = "ablfhir" }
-          elseif ($lk -eq "password") { $mergedParams[$k] = "scale" }
+          elseif ($lk -eq "password") { $mergedParams[$k] = $script:GatlingConfigPassword }
           elseif ($lk -eq "current_dt_tm") { $mergedParams[$k] = "{currentDateTime}" }
         }
 

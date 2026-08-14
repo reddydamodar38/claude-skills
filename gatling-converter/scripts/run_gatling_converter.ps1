@@ -10,7 +10,10 @@ param(
   [string]$DoneScriptsRoot = "C:/Users/prakash/Desktop/project/NBS/gatling/script/done",
   [string]$GeneratedScriptsRoot = "C:/Users/prakash/Desktop/project/NBS/gatling/script/generated",
   [string]$RunnerScriptsRoot = "C:/Users/prakash/.codex/skills/gatling-runner/scripts",
+  [string]$ConverterJarPath = "",
   [string]$ConversionReportsRoot = "C:/Users/prakash/Desktop/project/NBS/gatling/reports/conversion-yaml-audit",
+  [string]$AnnotationReportsRoot = "C:/Users/prakash/Desktop/project/NBS/gatling/reports/annotation-values",
+  [string]$AnnotationReportScriptPath = "C:/Users/prakash/.codex/skills/gatling-annotation-report/scripts/generate_annotation_report.ps1",
   [string]$SqlplusScriptPath = "C:/Users/prakash/.codex/skills/sqlplus/scripts/run_oracle_query.ps1",
   [string]$SqlFile = "C:/Users/prakash/Desktop/project/NBS/scenario-data/ALL_SCRIPTS_SQL.sql",
   [string]$TimeZone = "America/Chicago",
@@ -22,11 +25,51 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-RequiredEnvironmentValue {
+  param([Parameter(Mandatory=$true)][string]$Name)
+
+  $value = [Environment]::GetEnvironmentVariable($Name, "Process")
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    throw "Required environment variable '$Name' is not set."
+  }
+  return $value
+}
+
+$script:GatlingConfigPassword = Get-RequiredEnvironmentValue -Name "GATLING_CONFIG_PASSWORD"
+
 function Assert-CommandAvailable {
   param([string]$Name)
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
     throw "Required command not found in PATH: $Name"
   }
+}
+
+function Resolve-LocalWorkflowConverterJar {
+  param([string]$ExplicitJarPath)
+
+  if (-not [string]::IsNullOrWhiteSpace($ExplicitJarPath)) {
+    if (-not (Test-Path $ExplicitJarPath)) {
+      throw "Converter jar not found at explicit path: $ExplicitJarPath"
+    }
+    return (Resolve-Path $ExplicitJarPath).Path
+  }
+
+  $scriptDir = $PSScriptRoot
+  $candidates = @(
+    Get-ChildItem -Path $scriptDir -File -Filter "*workflow*converter*.jar" -ErrorAction SilentlyContinue
+  )
+
+  if ($candidates.Count -eq 0) {
+    $candidates = @(
+      Get-ChildItem -Path $scriptDir -File -Filter "workflow-converter*.jar" -ErrorAction SilentlyContinue
+    )
+  }
+
+  if ($candidates.Count -eq 0) {
+    throw "No workflow-converter jar found in skill scripts folder: $scriptDir"
+  }
+
+  return ($candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 }
 
 function Invoke-External {
@@ -328,7 +371,7 @@ function Ensure-ScenarioDataGlobalParams {
   param(
     [string]$ScenarioDataPath,
     [string]$DefaultAuthority = "MillDomain",
-    [string]$DefaultPassword = "scale",
+    [string]$DefaultPassword = $script:GatlingConfigPassword,
     [string]$DefaultUsername = ""
   )
   if (-not (Test-Path $ScenarioDataPath)) { return }
@@ -421,55 +464,89 @@ function Get-RepliesTransactionJsonMap {
 
   foreach ($path in $RepliesYamlPaths) {
     if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path $path)) { continue }
-
-    $lines = Get-Content -Path $path
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-      $mTx = [regex]::Match($lines[$i], '^\s*-\s*transName:\s*"?(?<tx>[^"\r\n]+)"?\s*$')
-      if (-not $mTx.Success) { continue }
-
-      $tx = $mTx.Groups['tx'].Value.Trim()
-      if ([string]::IsNullOrWhiteSpace($tx)) { continue }
-
-      $nextTx = $lines.Count
-      for ($j = $i + 1; $j -lt $lines.Count; $j++) {
-        if ($lines[$j] -match '^\s*-\s*transName:\s*') {
-          $nextTx = $j
-          break
-        }
-      }
-
-      $replyIdx = -1
-      for ($j = $i + 1; $j -lt $nextTx; $j++) {
-        if ($lines[$j] -match '^\s*replyBody:\s*\|-\s*$') {
-          $replyIdx = $j
-          break
-        }
-      }
-      if ($replyIdx -lt 0) { continue }
-
+    $reader = $null
+    try {
+      $reader = [System.IO.StreamReader]::new($path)
+      $currentTx = ""
+      $inReplyBody = $false
       $bodyLines = New-Object System.Collections.Generic.List[string]
-      for ($j = $replyIdx + 1; $j -lt $nextTx; $j++) {
-        $line = $lines[$j]
+
+      while (-not $reader.EndOfStream) {
+        $line = $reader.ReadLine()
+
+        $mTx = [regex]::Match($line, '^\s*-\s*transName:\s*"?(?<tx>[^"\r\n]+)"?\s*$')
+        if ($mTx.Success) {
+          if ($inReplyBody -and -not [string]::IsNullOrWhiteSpace($currentTx) -and $bodyLines.Count -gt 0) {
+            $normalized = ($bodyLines -join "`n").Trim()
+            if (-not [string]::IsNullOrWhiteSpace($normalized)) {
+              try {
+                $parsed = $normalized | ConvertFrom-Json -Depth 100
+                if (-not $map.Contains($currentTx)) {
+                  $map[$currentTx] = New-Object System.Collections.Generic.List[object]
+                }
+                $map[$currentTx].Add($parsed) | Out-Null
+              } catch {
+              }
+            }
+          }
+
+          $currentTx = $mTx.Groups['tx'].Value.Trim()
+          $inReplyBody = $false
+          $bodyLines.Clear()
+          continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace($currentTx)) { continue }
+
+        if (-not $inReplyBody) {
+          if ($line -match '^\s*replyBody:\s*\|-\s*$') {
+            $inReplyBody = $true
+          }
+          continue
+        }
+
         if ($line -match '^\s{6}(.*)$') {
           $bodyLines.Add($Matches[1]) | Out-Null
-        } elseif ([string]::IsNullOrWhiteSpace($line)) {
+          continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace($line)) {
           $bodyLines.Add('') | Out-Null
+          continue
         }
+
+        if ($bodyLines.Count -gt 0) {
+          $normalized = ($bodyLines -join "`n").Trim()
+          if (-not [string]::IsNullOrWhiteSpace($normalized)) {
+            try {
+              $parsed = $normalized | ConvertFrom-Json -Depth 100
+              if (-not $map.Contains($currentTx)) {
+                $map[$currentTx] = New-Object System.Collections.Generic.List[object]
+              }
+              $map[$currentTx].Add($parsed) | Out-Null
+            } catch {
+            }
+          }
+        }
+        $inReplyBody = $false
+        $bodyLines.Clear()
       }
 
-      if ($bodyLines.Count -eq 0) { continue }
-      $normalized = ($bodyLines -join "`n").Trim()
-      if ([string]::IsNullOrWhiteSpace($normalized)) { continue }
-
-      try {
-        $parsed = $normalized | ConvertFrom-Json -Depth 100
-        if (-not $map.Contains($tx)) {
-          $map[$tx] = New-Object System.Collections.Generic.List[object]
+      if ($inReplyBody -and -not [string]::IsNullOrWhiteSpace($currentTx) -and $bodyLines.Count -gt 0) {
+        $normalized = ($bodyLines -join "`n").Trim()
+        if (-not [string]::IsNullOrWhiteSpace($normalized)) {
+          try {
+            $parsed = $normalized | ConvertFrom-Json -Depth 100
+            if (-not $map.Contains($currentTx)) {
+              $map[$currentTx] = New-Object System.Collections.Generic.List[object]
+            }
+            $map[$currentTx].Add($parsed) | Out-Null
+          } catch {
+          }
         }
-        $map[$tx].Add($parsed) | Out-Null
-      } catch {
-        continue
       }
+    } finally {
+      if ($null -ne $reader) { $reader.Dispose() }
     }
   }
 
@@ -539,6 +616,11 @@ function Resolve-ExpressionValueFromReplies {
           if ($idx -lt 0 -or $idx -ge $current.Count) { $resolved = $false; break }
           $current = $current[$idx]
         } else {
+          # Some reply payloads collapse single-element arrays to objects.
+          # Allow [0] on a non-list object as a no-op so expressions like person[0].person_id still resolve.
+          if ($idx -eq 0) {
+            continue
+          }
           $resolved = $false
           break
         }
@@ -603,31 +685,6 @@ function Get-CanonicalIdentityKeyFromParamName {
   return ""
 }
 
-function Get-IdentityValueFromParamName {
-  param([string]$Name)
-  if ([string]::IsNullOrWhiteSpace($Name)) { return "" }
-  $n = $Name.ToLowerInvariant()
-
-  $patterns = @(
-    '^(?:.*_)?person_id_(?<v>\d+)$',
-    '^(?:.*_)?accession_(?<v>\d+)$',
-    '^(?:.*_)?accession_nbr_(?<v>\d+)$',
-    '^(?:.*_)?encntr_id_(?<v>\d+)$',
-    '^(?:.*_)?order_id_(?<v>\d+)$',
-    '^(?:.*_)?updt_id_(?<v>\d+)$',
-    '^(?:.*_)?prsnl_id_(?<v>\d+)$',
-    '^(?:.*_)?user_id_(?<v>\d+)$',
-    '^(?:.*_)?fin_num_(?<v>\d+)$'
-  )
-  foreach ($pat in $patterns) {
-    $m = [regex]::Match($n, $pat)
-    if ($m.Success) {
-      return $m.Groups['v'].Value
-    }
-  }
-  return ""
-}
-
 function Get-MoveToGlobalStringFromMap {
   param([System.Collections.IDictionary]$MoveMap)
   $pairs = New-Object System.Collections.Generic.List[string]
@@ -670,6 +727,24 @@ function Convert-MoveToGlobalStringToMap {
   $map = [ordered]@{}
   if ([string]::IsNullOrWhiteSpace($MoveToGlobal)) { return $map }
 
+  function Test-LooksLikeMoveToGlobalKey {
+    param([string]$RawKey)
+    if ([string]::IsNullOrWhiteSpace($RawKey)) { return $false }
+    $k = $RawKey.Trim().ToLowerInvariant()
+    return ($k -match '^(username(_[a-z0-9]+)?|user_id(_[a-z0-9]+)?|prsnl_id|person_id|updt_id|encntr_id|encounter_id|order_id|referral_id|refer_from_provider_id|fin_num|fin|accession(_nbr)?|authority|password)$')
+  }
+
+  function Get-NormalizedMoveToGlobalKey {
+    param([string]$RawKey)
+    if ([string]::IsNullOrWhiteSpace($RawKey)) { return "" }
+    $normalizedKey = $RawKey.Trim().ToLowerInvariant()
+    if ($normalizedKey -match '^username_[a-z0-9]+$') { return $normalizedKey }
+    if ($normalizedKey -match '^user_id_[a-z0-9]+$') { return $normalizedKey }
+    $canonical = Get-CanonicalIdentityKeyFromParamName -Name $normalizedKey
+    if ([string]::IsNullOrWhiteSpace($canonical)) { return $normalizedKey }
+    return $canonical
+  }
+
   $pairs = $MoveToGlobal.Split(',')
   foreach ($rawPair in $pairs) {
     $pair = $rawPair.Trim()
@@ -678,23 +753,29 @@ function Convert-MoveToGlobalStringToMap {
     $idx = $pair.IndexOf(':')
     if ($idx -lt 1 -or $idx -ge ($pair.Length - 1)) { continue }
 
-    $value = $pair.Substring(0, $idx).Trim()
-    $key = $pair.Substring($idx + 1).Trim()
-    if ([string]::IsNullOrWhiteSpace($value) -or [string]::IsNullOrWhiteSpace($key)) { continue }
+    $left = $pair.Substring(0, $idx).Trim()
+    $right = $pair.Substring($idx + 1).Trim()
+    if ([string]::IsNullOrWhiteSpace($left) -or [string]::IsNullOrWhiteSpace($right)) { continue }
 
-    $normalizedKey = $key.Trim().ToLowerInvariant()
-    $canonical = ""
-    if ($normalizedKey -match '^username_[a-z0-9]+$') {
-      $canonical = $normalizedKey
+    $leftLooksLikeKey = Test-LooksLikeMoveToGlobalKey -RawKey $left
+    $rightLooksLikeKey = Test-LooksLikeMoveToGlobalKey -RawKey $right
+    $leftKey = if ($leftLooksLikeKey) { Get-NormalizedMoveToGlobalKey -RawKey $left } else { "" }
+    $rightKey = if ($rightLooksLikeKey) { Get-NormalizedMoveToGlobalKey -RawKey $right } else { "" }
+
+    # Accept both key:value and value:key; normalize to map[key]=value.
+    if ($leftLooksLikeKey -and -not $rightLooksLikeKey) {
+      $map[$leftKey] = $right
+      continue
     }
-    elseif ($normalizedKey -match '^user_id_[a-z0-9]+$') {
-      $canonical = $normalizedKey
+    if ($rightLooksLikeKey -and -not $leftLooksLikeKey) {
+      $map[$rightKey] = $left
+      continue
     }
-    else {
-      $canonical = Get-CanonicalIdentityKeyFromParamName -Name $normalizedKey
-      if ([string]::IsNullOrWhiteSpace($canonical)) { $canonical = $normalizedKey }
+    if ($leftLooksLikeKey -and $rightLooksLikeKey) {
+      # Ambiguous pair; prefer canonical key on the left if both look like keys.
+      $map[$leftKey] = $right
+      continue
     }
-    $map[$canonical] = $value
   }
 
   return $map
@@ -746,16 +827,10 @@ function Get-MoveToGlobalUsernameMap {
   $userMap = [ordered]@{}
   if ([string]::IsNullOrWhiteSpace($MoveToGlobal)) { return $userMap }
 
-  $pairs = $MoveToGlobal.Split(',')
-  foreach ($rawPair in $pairs) {
-    $pair = $rawPair.Trim()
-    if ([string]::IsNullOrWhiteSpace($pair)) { continue }
-
-    $idx = $pair.IndexOf(':')
-    if ($idx -lt 1 -or $idx -ge ($pair.Length - 1)) { continue }
-
-    $value = $pair.Substring(0, $idx).Trim()
-    $key = $pair.Substring($idx + 1).Trim().ToLowerInvariant()
+  $parsed = Convert-MoveToGlobalStringToMap -MoveToGlobal $MoveToGlobal
+  foreach ($k in $parsed.Keys) {
+    $key = [string]$k
+    $value = [string]$parsed[$k]
     if ([string]::IsNullOrWhiteSpace($value) -or [string]::IsNullOrWhiteSpace($key)) { continue }
     if ($key -notmatch '^username(_[a-z0-9]+)?$') { continue }
     if (Is-PlaceholderUsername -Value $value) { continue }
@@ -1015,23 +1090,29 @@ function Get-IdentityMoveMapFromScenarioAndReplies {
   $canonicalOrder = New-Object System.Collections.Generic.List[string]
   $valueCountsByCanonical = @{}
   $valueOrderByCanonical = @{}
+  $valueSourceRankByCanonical = @{}
   $raw = Get-Content -Raw $ScenarioDataPath
   $pattern = '(?ms)-\s+name:\s*"?(?<name>[^"\r\n]+)"?\s*\r?\n\s+value:\s*"?(?<value>[^"\r\n]+)"?'
   $matches = [regex]::Matches($raw, $pattern)
   function Add-CanonicalValueCount {
     param(
       [string]$CanonicalKey,
-      [string]$ResolvedValue
+      [string]$ResolvedValue,
+      [int]$SourceRank = 0
     )
     if ([string]::IsNullOrWhiteSpace($CanonicalKey) -or [string]::IsNullOrWhiteSpace($ResolvedValue)) { return }
     if (-not $valueCountsByCanonical.ContainsKey($CanonicalKey)) {
       $valueCountsByCanonical[$CanonicalKey] = @{}
       $valueOrderByCanonical[$CanonicalKey] = New-Object System.Collections.Generic.List[string]
+      $valueSourceRankByCanonical[$CanonicalKey] = @{}
       [void]$canonicalOrder.Add($CanonicalKey)
     }
     if (-not $valueCountsByCanonical[$CanonicalKey].ContainsKey($ResolvedValue)) {
       $valueCountsByCanonical[$CanonicalKey][$ResolvedValue] = 0
       [void]$valueOrderByCanonical[$CanonicalKey].Add($ResolvedValue)
+      $valueSourceRankByCanonical[$CanonicalKey][$ResolvedValue] = $SourceRank
+    } elseif ($SourceRank -gt [int]$valueSourceRankByCanonical[$CanonicalKey][$ResolvedValue]) {
+      $valueSourceRankByCanonical[$CanonicalKey][$ResolvedValue] = $SourceRank
     }
     $valueCountsByCanonical[$CanonicalKey][$ResolvedValue] = [int]$valueCountsByCanonical[$CanonicalKey][$ResolvedValue] + 1
   }
@@ -1046,21 +1127,24 @@ function Get-IdentityMoveMapFromScenarioAndReplies {
     if ($canonical -in @("authority","password")) { continue }
 
     $resolved = $value
+    $sourceRank = 0
     if ($value.StartsWith('${')) {
       $resolved = Resolve-ExpressionValueFromReplies -Expression $value -RepliesJsonMap $repliesMap
-    }
-    if ([string]::IsNullOrWhiteSpace($resolved) -or $resolved.StartsWith('${')) {
-      # Fallback for identity params where value is encoded in the param name
-      # (for example person_id_<id>, accession_<id>).
-      $resolved = Get-IdentityValueFromParamName -Name $name
+      if (-not [string]::IsNullOrWhiteSpace($resolved) -and -not $resolved.StartsWith('${')) {
+        # Highest confidence: value resolved from pass-1 replies evidence.
+        $sourceRank = 2
+      }
+    } elseif (-not [string]::IsNullOrWhiteSpace($value)) {
+      # Strong evidence: concrete literal present in scenario-data.
+      $sourceRank = 2
     }
     if ([string]::IsNullOrWhiteSpace($resolved) -or $resolved.StartsWith('${')) { continue }
 
-    Add-CanonicalValueCount -CanonicalKey $canonical -ResolvedValue $resolved
+    Add-CanonicalValueCount -CanonicalKey $canonical -ResolvedValue $resolved -SourceRank $sourceRank
 
     # User identity aliasing: prsnl_id is commonly the source for user_id.
     if ($canonical -eq "prsnl_id") {
-      Add-CanonicalValueCount -CanonicalKey "user_id" -ResolvedValue $resolved
+      Add-CanonicalValueCount -CanonicalKey "user_id" -ResolvedValue $resolved -SourceRank $sourceRank
     }
   }
 
@@ -1085,24 +1169,30 @@ function Get-IdentityMoveMapFromScenarioAndReplies {
 
   foreach ($canonical in $canonicalOrder) {
     $bestValue = ""
+    $bestSourceRank = -1
     $bestCount = -1
     $bestScore = -1
     foreach ($candidateValue in $valueOrderByCanonical[$canonical]) {
+      $sourceRank = [int]$valueSourceRankByCanonical[$canonical][$candidateValue]
       $count = [int]$valueCountsByCanonical[$canonical][$candidateValue]
       $score = Get-IdentityValueQualityScore -CanonicalKey $canonical -Value $candidateValue
       $shouldReplace = $false
-      if ($canonical -eq 'accession_nbr') {
+      if ($sourceRank -gt $bestSourceRank) {
+        $shouldReplace = $true
+      }
+      elseif ($sourceRank -eq $bestSourceRank -and $canonical -eq 'accession_nbr') {
         # For accession values, prefer strong numeric identifiers over short alpha tokens.
         if ($score -gt $bestScore -or ($score -eq $bestScore -and $count -gt $bestCount)) {
           $shouldReplace = $true
         }
       }
-      else {
+      elseif ($sourceRank -eq $bestSourceRank) {
         if ($count -gt $bestCount -or ($count -eq $bestCount -and $score -gt $bestScore)) {
           $shouldReplace = $true
         }
       }
       if ($shouldReplace) {
+        $bestSourceRank = $sourceRank
         $bestCount = $count
         $bestScore = $score
         $bestValue = $candidateValue
@@ -1281,130 +1371,74 @@ function Convert-RecordingRemote {
   param(
     [string]$RecordingDir,
     [string]$MoveToGlobal,
-    [bool]$SkipConverterUsernameArg = $false
+    [bool]$SkipConverterUsernameArg = $false,
+    [string]$ConverterJar
   )
 
   $recordingName = Split-Path $RecordingDir -Leaf
   $timestamp = Get-Date -Format "yyyyMMddHHmmss"
   $rand = [System.Guid]::NewGuid().ToString("N").Substring(0, 8)
-  $remoteBase = "/root/gatling/gatling-converter-$timestamp-$rand"
-  $remoteInputRoot = "$remoteBase/input"
-  $remoteOutputRoot = "$remoteBase/output"
-  $remoteRecordingPath = "$remoteInputRoot/$recordingName"
+  $localDownloadRoot = Join-Path $env:TEMP "gatling_converter_downloads"
+  New-Item -ItemType Directory -Force -Path $localDownloadRoot | Out-Null
+  $localTarget = Join-Path $localDownloadRoot "$recordingName-$timestamp-$rand"
+  $localInputRoot = Join-Path $localTarget "input"
+  $localOutputRoot = Join-Path $localTarget "output"
+  $localRecordingPath = Join-Path $localInputRoot $recordingName
 
-  Write-Host "Creating remote working directory: $remoteBase"
-  Invoke-Ssh "mkdir -p '$remoteInputRoot' '$remoteOutputRoot'"
+  New-Item -ItemType Directory -Force -Path $localInputRoot | Out-Null
+  New-Item -ItemType Directory -Force -Path $localOutputRoot | Out-Null
 
-  $uploadTempRoot = Join-Path $env:TEMP "gatling_converter_uploads"
-  New-Item -ItemType Directory -Force -Path $uploadTempRoot | Out-Null
-  $localArchive = Join-Path $uploadTempRoot "$recordingName-$timestamp.tar.gz"
-  $recordingParent = Split-Path $RecordingDir -Parent
-  $recordingLeaf = Split-Path $RecordingDir -Leaf
-  $remoteArchive = "$remoteBase/$recordingName-$timestamp.tar.gz"
+  Write-Host "Preparing local conversion workspace: $localTarget"
+  Copy-Item -Path $RecordingDir -Destination $localInputRoot -Recurse -Force
 
-  try {
-    Write-Host "Compressing recording for upload: $recordingName"
-    $tarArgs = @(
-      "-czf", $localArchive,
-      "-C", $recordingParent,
-      $recordingLeaf
-    )
-    Invoke-External -Exe "tar" -CmdArgs $tarArgs
-
-    Write-Host "Uploading compressed recording archive: $([IO.Path]::GetFileName($localArchive))"
-    Invoke-ScpUploadFile -LocalFile $localArchive -RemoteTargetFile $remoteArchive
-
-    Write-Host "Extracting archive on remote host..."
-    Invoke-Ssh "tar -xzf '$remoteArchive' -C '$remoteInputRoot'"
-    Invoke-Ssh "rm -f '$remoteArchive'"
+  if (-not (Test-Path $localRecordingPath)) {
+    throw "Copied recording directory not found at: $localRecordingPath"
   }
-  finally {
-    if (Test-Path $localArchive) {
-      Remove-Item -Force -Path $localArchive -ErrorAction SilentlyContinue
-    }
-  }
-
-  $remoteRecordingPath = (Get-SshOutput "find '$remoteInputRoot' -mindepth 1 -maxdepth 1 -type d | head -n 1").Trim()
-  if ([string]::IsNullOrWhiteSpace($remoteRecordingPath)) {
-    throw "Upload failed: no recording directory found under remote input root $remoteInputRoot"
-  }
-  Write-Host "Resolved remote recording path: $remoteRecordingPath"
 
   Write-Host "Removing noise folders (cernserver*/discernnotify*)"
-  Invoke-Ssh "find '$remoteRecordingPath' -maxdepth 1 -type d \( -name 'cernserver*' -o -name 'discernnotify*' \) -exec rm -rf {} + 2>/dev/null || true"
-
-  $combineCountCmd = "find '$remoteRecordingPath' -mindepth 1 -maxdepth 1 -type d | wc -l"
-  $combineCount = (Get-SshOutput $combineCountCmd).Trim()
-  if (-not $combineCount) { $combineCount = "0" }
-
-  $workflowJarCmd = "ls -1 /root/gatling/*workflow*converter*.jar /root/gatling/workflow-converter*.jar 2>/dev/null | head -n 1"
-  $workflowJar = (Get-SshOutput $workflowJarCmd).Trim()
-  if ([string]::IsNullOrWhiteSpace($workflowJar)) {
-    throw "workflow-converter jar not found in /root/gatling on remote host."
+  $noiseDirs = Get-ChildItem -Path $localRecordingPath -Directory -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like "cernserver*" -or $_.Name -like "discernnotify*" }
+  foreach ($nd in $noiseDirs) {
+    Remove-Item -LiteralPath $nd.FullName -Recurse -Force -ErrorAction SilentlyContinue
   }
 
-  $remoteInputForConverter = $remoteRecordingPath
-  if ([int]$combineCount -le 1) {
-    $singleChild = (Get-SshOutput "find '$remoteRecordingPath' -mindepth 1 -maxdepth 1 -type d | head -n 1").Trim()
-    if (-not [string]::IsNullOrWhiteSpace($singleChild)) {
-      $remoteInputForConverter = $singleChild
-    }
+  $childDirs = @(Get-ChildItem -Path $localRecordingPath -Directory -ErrorAction SilentlyContinue)
+  $childFiles = @(Get-ChildItem -Path $localRecordingPath -File -ErrorAction SilentlyContinue)
+  $combineCount = $childDirs.Count
+  $localInputForConverter = $localRecordingPath
+  if ($combineCount -le 1 -and $childDirs.Count -eq 1) {
+    $localInputForConverter = $childDirs[0].FullName
+  }
+  if ($childDirs.Count -eq 0 -and $childFiles.Count -eq 0) {
+    throw "Recording has no remaining content after noise cleanup: $localRecordingPath"
   }
 
   $converterArgs = @(
-    "java -jar '$workflowJar'",
-    "-input '$remoteInputForConverter'",
-    "-output '$remoteOutputRoot'",
-    "-password '`${password}'",
-    "-authority '`${authority}'",
-    "-request-format YAML",
-    "-reply-format YAML",
-    "-time-zone '$TimeZone'",
+    "-jar", $ConverterJar,
+    "-input", $localInputForConverter,
+    "-output", $localOutputRoot,
+    "-p", '${password}',
+    "-a", '${authority}',
+    "-request-format", "YAML",
+    "-reply-format", "YAML",
+    "-time-zone", $TimeZone,
     "--acsv",
     "-n_cd",
-    "-dh $TargetAlias"
+    "-dh", $TargetAlias
   )
   if (-not $SkipConverterUsernameArg) {
-    $converterArgs += "-username '`${username}'"
+    $converterArgs += @("-username", '${username}')
   } else {
     Write-Host "Skipping workflow-converter username argument because multiple explicit username_* overrides were supplied."
   }
-  if ([int]$combineCount -gt 1) {
-    $converterArgs += "--combine"
+  if ($combineCount -gt 1) {
   }
   if (-not [string]::IsNullOrWhiteSpace($MoveToGlobal)) {
-    $converterArgs += "--move-to-global '$MoveToGlobal'"
+    $converterArgs += @("--move-to-global", $MoveToGlobal)
   }
-  $remoteConverterCmd = $converterArgs -join " "
-  Write-Host "Running remote converter..."
-  Invoke-Ssh $remoteConverterCmd
+  Write-Host "Running local workflow-converter jar: $ConverterJar"
+  Invoke-External -Exe "java" -CmdArgs $converterArgs
 
-  $localDownloadRoot = Join-Path $env:TEMP "gatling_converter_downloads"
-  New-Item -ItemType Directory -Force -Path $localDownloadRoot | Out-Null
-  $localTarget = Join-Path $localDownloadRoot "$recordingName-$timestamp"
-  New-Item -ItemType Directory -Force -Path $localTarget | Out-Null
-
-  $remoteOutputArchive = "$remoteBase/output-$recordingName-$timestamp.tar.gz"
-  $localOutputArchive = Join-Path $localTarget "output-$recordingName-$timestamp.tar.gz"
-
-  Write-Host "Compressing converter output on remote host..."
-  Invoke-Ssh "set -e; tar -czf '$remoteOutputArchive' -C '$remoteBase' output"
-
-  Write-Host "Downloading compressed converter output..."
-  Invoke-ScpDownloadFile -RemoteFile $remoteOutputArchive -LocalFile $localOutputArchive
-
-  Write-Host "Extracting downloaded converter archive..."
-  $tarExtractArgs = @(
-    "-xzf", $localOutputArchive,
-    "-C", $localTarget
-  )
-  Invoke-External -Exe "tar" -CmdArgs $tarExtractArgs
-
-  if (Test-Path $localOutputArchive) {
-    Remove-Item -Force -Path $localOutputArchive -ErrorAction SilentlyContinue
-  }
-
-  Invoke-Ssh "rm -rf '$remoteBase'" 
   return $localTarget
 }
 
@@ -1454,7 +1488,7 @@ function Prepare-RunnerScenario {
       @"
 authority: $TargetAlias
 username: SYSTEM
-password: system
+password: $script:GatlingConfigPassword
 verboseLogging: true
 "@ | Set-Content -Path (Join-Path $dir "config.yaml")
     }
@@ -1464,9 +1498,421 @@ verboseLogging: true
     if ($DerivedIdentityMap -and $DerivedIdentityMap.Contains("username")) {
       $preferredUsername = [string]$DerivedIdentityMap["username"]
     }
-    Ensure-ScenarioDataGlobalParams -ScenarioDataPath $targetScenarioData -DefaultAuthority "MillDomain" -DefaultPassword "scale" -DefaultUsername $preferredUsername
+    Ensure-ScenarioDataGlobalParams -ScenarioDataPath $targetScenarioData -DefaultAuthority "MillDomain" -DefaultPassword $script:GatlingConfigPassword -DefaultUsername $preferredUsername
   }
   return $runnerDir
+}
+
+function Get-DateTimeSecondStamp {
+  param([string]$Value)
+  if ([string]::IsNullOrWhiteSpace($Value)) { return "" }
+
+  $text = $Value.Trim().Trim('"').Trim("'")
+  if ([string]::IsNullOrWhiteSpace($text)) { return "" }
+
+  $dto = [datetimeoffset]::MinValue
+  if ([datetimeoffset]::TryParse($text, [ref]$dto)) {
+    return $dto.ToString("yyyy-MM-ddTHH:mm:ss")
+  }
+
+  $m = [regex]::Match($text, '^(?<sec>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})')
+  if ($m.Success) {
+    return $m.Groups["sec"].Value
+  }
+  return ""
+}
+
+function Get-DateTimeOffsetValue {
+  param([string]$Value)
+  if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+  $text = $Value.Trim().Trim('"').Trim("'")
+  if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+  $dto = [datetimeoffset]::MinValue
+  if ([datetimeoffset]::TryParse($text, [ref]$dto)) {
+    return $dto
+  }
+  return $null
+}
+
+function Normalize-ScenarioPostBodyDateTimesToCurrent {
+  param(
+    [string]$ScenarioYamlPath,
+    [string]$ScenarioDataPath = "",
+    [string]$ReplacementReportPath = ""
+  )
+  if ([string]::IsNullOrWhiteSpace($ScenarioYamlPath) -or -not (Test-Path $ScenarioYamlPath)) {
+    return @{ Replacements = 0; Transactions = 0; AddedAnnotations = 0; ReportPath = "" }
+  }
+  if ([string]::IsNullOrWhiteSpace($ScenarioDataPath)) {
+    $ScenarioDataPath = Join-Path (Split-Path $ScenarioYamlPath -Parent) "scenario-data.yaml"
+  }
+
+  $lines = Get-Content -Path $ScenarioYamlPath
+  $out = New-Object System.Collections.Generic.List[string]
+  $currentTransName = ""
+  $currentTimestamp = $null
+  $inPostBody = $false
+  $postBodyIndent = -1
+  $state = [pscustomobject]@{
+    ReplacementCount = 0
+    TouchedTransactions = (New-Object 'System.Collections.Generic.HashSet[string]')
+    ExistingAnnotationNames = (New-Object 'System.Collections.Generic.HashSet[string]')
+    AnnotationDefinitions = @{}
+    Rows = (New-Object System.Collections.Generic.List[object])
+    AddedAnnotationCount = 0
+    ReportPath = ""
+  }
+
+  function Get-IndentLen {
+    param([string]$Line)
+    $m = [regex]::Match($Line, '^(\s*)')
+    return $m.Groups[1].Value.Length
+  }
+
+  function Get-HourOffsetAnnotationDefinition {
+    param([int]$HourOffset)
+    if ($HourOffset -gt 0) {
+      $n = [string]$HourOffset
+      return @{
+        Name = "current_dt_tm_plus_${n}_hour"
+        Value = "{currentDateTime $n Hour}"
+      }
+    }
+    $abs = [Math]::Abs($HourOffset)
+    $n = [string]$abs
+    return @{
+      Name = "current_dt_tm_minus_${n}_hour"
+      Value = "{currentDateTime -$n Hour}"
+    }
+  }
+
+  function Get-DayOffsetAnnotationDefinition {
+    param([int]$DayOffset)
+    if ($DayOffset -ge 0) {
+      return @{
+        Name = "current_dt_plus_${DayOffset}_day"
+        Value = "{currentDate $DayOffset Day}"
+      }
+    }
+    $abs = [Math]::Abs($DayOffset)
+    return @{
+      Name = "current_dt_minus_${abs}_day"
+      Value = "{currentDate -$abs Day}"
+    }
+  }
+
+  function Load-ExistingGlobalAnnotationNames {
+    param([string]$ScenarioDataPathArg)
+    $names = New-Object 'System.Collections.Generic.HashSet[string]'
+    if ([string]::IsNullOrWhiteSpace($ScenarioDataPathArg) -or -not (Test-Path $ScenarioDataPathArg)) { return $names }
+    $sdLines = Get-Content -Path $ScenarioDataPathArg
+    $globalStart = -1
+    $scenarioDataStart = -1
+    for ($i = 0; $i -lt $sdLines.Count; $i++) {
+      if ($globalStart -lt 0 -and $sdLines[$i] -match '^globalDataSets:\s*$') { $globalStart = $i; continue }
+      if ($globalStart -ge 0 -and $sdLines[$i] -match '^scenarioDataSets:\s*') { $scenarioDataStart = $i; break }
+    }
+    if ($globalStart -lt 0) { return $names }
+    if ($scenarioDataStart -lt 0) { $scenarioDataStart = $sdLines.Count }
+
+    for ($i = $globalStart + 1; $i -lt $scenarioDataStart; $i++) {
+      $nm = [regex]::Match($sdLines[$i], '^\s*-\s+name:\s*"?(?<n>[^"\r\n]+)"?')
+      if ($nm.Success) {
+        [void]$names.Add($nm.Groups["n"].Value.Trim())
+      }
+    }
+    return $names
+  }
+
+  function Ensure-ScenarioDataAnnotations {
+    param(
+      [string]$ScenarioDataPathArg,
+      [hashtable]$AnnotationDefinitionsArg
+    )
+    if ([string]::IsNullOrWhiteSpace($ScenarioDataPathArg) -or -not (Test-Path $ScenarioDataPathArg)) { return 0 }
+    if ($null -eq $AnnotationDefinitionsArg -or $AnnotationDefinitionsArg.Count -eq 0) { return 0 }
+
+    $sdLines = [System.Collections.Generic.List[string]](Get-Content -Path $ScenarioDataPathArg)
+    $globalStart = -1
+    $scenarioDataStart = -1
+    for ($i = 0; $i -lt $sdLines.Count; $i++) {
+      if ($globalStart -lt 0 -and $sdLines[$i] -match '^globalDataSets:\s*$') { $globalStart = $i; continue }
+      if ($globalStart -ge 0 -and $sdLines[$i] -match '^scenarioDataSets:\s*') { $scenarioDataStart = $i; break }
+    }
+    if ($globalStart -lt 0) { return 0 }
+    if ($scenarioDataStart -lt 0) { $scenarioDataStart = $sdLines.Count }
+
+    $existing = New-Object 'System.Collections.Generic.HashSet[string]'
+    for ($i = $globalStart + 1; $i -lt $scenarioDataStart; $i++) {
+      $nm = [regex]::Match($sdLines[$i], '^\s*-\s+name:\s*"?(?<n>[^"\r\n]+)"?')
+      if ($nm.Success) { [void]$existing.Add($nm.Groups["n"].Value.Trim()) }
+    }
+
+    $insertAt = -1
+    for ($i = $globalStart + 1; $i -lt $scenarioDataStart; $i++) {
+      if ($sdLines[$i] -match '^\s*headers:\s*') { $insertAt = $i; break }
+    }
+    if ($insertAt -lt 0) { $insertAt = $scenarioDataStart }
+
+    $added = 0
+    $annotationNames = @($AnnotationDefinitionsArg.Keys | Sort-Object)
+    foreach ($name in $annotationNames) {
+      $value = [string]$AnnotationDefinitionsArg[$name]
+      if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($value)) { continue }
+      if ($existing.Contains($name)) { continue }
+
+      $sdLines.Insert($insertAt, "  - name: `"$name`"")
+      $insertAt++
+      $sdLines.Insert($insertAt, "    value: `"$value`"")
+      $insertAt++
+      [void]$existing.Add($name)
+      $added++
+    }
+
+    if ($added -gt 0) {
+      Set-Content -Path $ScenarioDataPathArg -Value $sdLines -Encoding UTF8
+    }
+    return $added
+  }
+
+  function Get-KeyStatus {
+    param([string]$AnnotationKey)
+    if ([string]::IsNullOrWhiteSpace($AnnotationKey)) { return "" }
+    if ($state.ExistingAnnotationNames.Contains($AnnotationKey)) { return "reused" }
+    return "created"
+  }
+
+  $state.ExistingAnnotationNames = Load-ExistingGlobalAnnotationNames -ScenarioDataPathArg $ScenarioDataPath
+
+  function Write-DateTimeReplacementReport {
+    param(
+      [string]$ReportPathArg,
+      [object[]]$RowsArg
+    )
+    if ([string]::IsNullOrWhiteSpace($ReportPathArg)) { return "" }
+    $dir = Split-Path -Path $ReportPathArg -Parent
+    if (-not [string]::IsNullOrWhiteSpace($dir)) {
+      New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    $enc = { param([string]$s) [System.Net.WebUtility]::HtmlEncode([string]$s) }
+    $html = New-Object System.Collections.Generic.List[string]
+    $html.Add("<!doctype html>") | Out-Null
+    $html.Add("<html><head><meta charset='utf-8'><title>DateTime Annotation Replacements</title>") | Out-Null
+    $html.Add("<style>body{font-family:Segoe UI,Arial,sans-serif;margin:20px;color:#222}table{border-collapse:collapse;width:100%;margin-top:8px}th,td{border:1px solid #d0d7de;padding:6px 8px;text-align:left;font-size:12px}th{background:#f6f8fa}code{background:#f6f8fa;padding:1px 4px;border-radius:4px}</style></head><body>") | Out-Null
+    $html.Add("<h2>DateTime Annotation Replacements</h2>") | Out-Null
+    $html.Add("<div>Generated: $(& $enc (Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'))</div>") | Out-Null
+    $html.Add("<table><thead><tr><th>transName</th><th>fieldPath</th><th>timestamp</th><th>originalDateTime</th><th>replacement</th><th>rule</th><th>dayOffset</th><th>annotationKey</th><th>keyStatus</th><th>deltaSeconds</th></tr></thead><tbody>") | Out-Null
+
+    if ($null -eq $RowsArg -or $RowsArg.Count -eq 0) {
+      $html.Add("<tr><td colspan='10'>No datetime replacements were made.</td></tr>") | Out-Null
+    } else {
+      foreach ($r in $RowsArg) {
+        $html.Add("<tr><td>$(& $enc $r.transName)</td><td>$(& $enc $r.fieldPath)</td><td><code>$(& $enc $r.timestamp)</code></td><td><code>$(& $enc $r.originalDateTime)</code></td><td><code>$(& $enc $r.replacement)</code></td><td>$(& $enc $r.rule)</td><td>$(& $enc ([string]$r.dayOffset))</td><td>$(& $enc $r.annotationKey)</td><td>$(& $enc $r.keyStatus)</td><td>$(& $enc ([string]$r.deltaSeconds))</td></tr>") | Out-Null
+      }
+    }
+
+    $html.Add("</tbody></table></body></html>") | Out-Null
+    Set-Content -Path $ReportPathArg -Value ($html -join "`r`n") -Encoding UTF8
+    return $ReportPathArg
+  }
+
+  function Replace-LineDateTimes {
+    param(
+      [string]$Line,
+      [datetimeoffset]$TimestampValue,
+      [string]$TransName
+    )
+    if ($null -eq $TimestampValue) { return $Line }
+
+    if ($TransName -ieq "GetAppointmentAvailability_823_0") {
+      $Line = [regex]::Replace(
+        $Line,
+        '(?<prefix>"(?<field>begin_dt_tm|end_dt_tm)"\s*:\s*")(?<date>\d{4}-\d{2}-\d{2})(?<time>T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z)(?<suffix>")',
+        {
+          param($m)
+          $fullText = $m.Groups["date"].Value + $m.Groups["time"].Value
+          $dv = Get-DateTimeOffsetValue -Value $fullText
+          if ($null -eq $dv) { return $m.Value }
+
+          $anchorDate = $TimestampValue.ToUniversalTime().Date
+          $targetDate = $dv.ToUniversalTime().Date
+          $dayOffset = ($targetDate - $anchorDate).Days
+
+          $def = Get-DayOffsetAnnotationDefinition -DayOffset $dayOffset
+          $state.AnnotationDefinitions[$def.Name] = $def.Value
+          $keyStatus = Get-KeyStatus -AnnotationKey $def.Name
+          $replacementToken = '$' + '{' + $def.Name + '}'
+          $replacementText = $replacementToken + $m.Groups["time"].Value
+
+          $state.ReplacementCount++
+          if (-not [string]::IsNullOrWhiteSpace($TransName)) {
+            [void]$state.TouchedTransactions.Add($TransName)
+          }
+          $state.Rows.Add([pscustomobject]@{
+            transName = $TransName
+            fieldPath = "instanceJson.list_of_date_range[*].$($m.Groups['field'].Value)"
+            timestamp = $TimestampValue.ToString("yyyy-MM-ddTHH:mm:ss.fffK")
+            originalDateTime = $fullText
+            replacement = $replacementText
+            rule = "date-only day-offset annotation"
+            dayOffset = $dayOffset
+            annotationKey = $def.Name
+            keyStatus = $keyStatus
+            deltaSeconds = [Math]::Round(($dv - $TimestampValue).TotalSeconds, 3)
+          }) | Out-Null
+
+          return $m.Groups["prefix"].Value + $replacementText + $m.Groups["suffix"].Value
+        }
+      )
+    }
+
+    return [regex]::Replace(
+      $Line,
+      '(?<q>["''])(?<dt>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+\-]\d{2}:\d{2})?)(?<q2>["''])',
+      {
+        param($m)
+        $dv = Get-DateTimeOffsetValue -Value $m.Groups["dt"].Value
+        if ($null -eq $dv) { return $m.Value }
+
+        $rawDeltaSeconds = ($dv - $TimestampValue).TotalSeconds
+        $absDeltaSeconds = [Math]::Abs($rawDeltaSeconds)
+        $replacementToken = ""
+        $rule = ""
+
+        if ($absDeltaSeconds -le 5) {
+          $replacementToken = '${current_dt_tm}'
+          $rule = "within +/-5s"
+        } else {
+          $nearestHour = [int][Math]::Round(($rawDeltaSeconds / 3600.0), 0, [System.MidpointRounding]::AwayFromZero)
+          if ([Math]::Abs($nearestHour) -gt 24) { return $m.Value }
+          $hourDelta = [Math]::Abs($rawDeltaSeconds - ($nearestHour * 3600))
+          if ($nearestHour -ne 0 -and $hourDelta -le 5) {
+            $def = Get-HourOffsetAnnotationDefinition -HourOffset $nearestHour
+            $state.AnnotationDefinitions[$def.Name] = $def.Value
+            $replacementToken = '$' + '{' + [string]$def.Name + '}'
+            if ($nearestHour -gt 0) {
+              $rule = "+$nearestHour hour +/-5s"
+            } else {
+              $rule = "$nearestHour hour +/-5s"
+            }
+          } else {
+            return $m.Value
+          }
+        }
+
+        $state.ReplacementCount++
+        if (-not [string]::IsNullOrWhiteSpace($TransName)) {
+          [void]$state.TouchedTransactions.Add($TransName)
+        }
+        $annotationKey = ""
+        if ($replacementToken -match '^\$\{(?<k>[^}]+)\}$') {
+          $annotationKey = $Matches['k']
+        }
+        $state.Rows.Add([pscustomobject]@{
+          transName = $TransName
+          fieldPath = ""
+          timestamp = $TimestampValue.ToString("yyyy-MM-ddTHH:mm:ss.fffK")
+          originalDateTime = $m.Groups["dt"].Value
+          replacement = $replacementToken
+          rule = $rule
+          dayOffset = ""
+          annotationKey = $annotationKey
+          keyStatus = Get-KeyStatus -AnnotationKey $annotationKey
+          deltaSeconds = [Math]::Round($rawDeltaSeconds, 3)
+        }) | Out-Null
+        return $m.Groups["q"].Value + $replacementToken + $m.Groups["q2"].Value
+      }
+    )
+  }
+
+  foreach ($line in $lines) {
+    $transMatch = [regex]::Match($line, '^\s*-\s+transName:\s*"?(?<name>[^"\r\n]+)"?')
+    if ($transMatch.Success) {
+      $currentTransName = $transMatch.Groups["name"].Value.Trim()
+      $currentTimestamp = $null
+      $inPostBody = $false
+      $postBodyIndent = -1
+      $out.Add($line) | Out-Null
+      continue
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($currentTransName)) {
+      $tsMatch = [regex]::Match($line, '^\s*timestamp:\s*"?(?<ts>[^"\r\n]+)"?')
+      if ($tsMatch.Success) {
+        $currentTimestamp = Get-DateTimeOffsetValue -Value $tsMatch.Groups["ts"].Value
+        $inPostBody = $false
+        $postBodyIndent = -1
+        $out.Add($line) | Out-Null
+        continue
+      }
+    }
+
+    if ($inPostBody) {
+      $isBlank = [string]::IsNullOrWhiteSpace($line)
+      $indent = Get-IndentLen -Line $line
+      $isNewYamlField = ($line -match '^\s*[A-Za-z_][A-Za-z0-9_]*\s*:')
+      $isNewListItem = ($line -match '^\s*-\s+[A-Za-z_][A-Za-z0-9_]*\s*:')
+      if (-not $isBlank -and $indent -le $postBodyIndent -and ($isNewYamlField -or $isNewListItem)) {
+        $inPostBody = $false
+        $postBodyIndent = -1
+      }
+    }
+
+    $postBodyMatch = [regex]::Match($line, '^(?<indent>\s*)postBody:\s*(?<rest>.*)$')
+    if ($postBodyMatch.Success) {
+      $baseLine = Replace-LineDateTimes -Line $line -TimestampValue $currentTimestamp -TransName $currentTransName
+      $out.Add($baseLine) | Out-Null
+      $rest = [string]$postBodyMatch.Groups["rest"].Value
+      if ($rest.TrimStart().StartsWith("|")) {
+        $inPostBody = $true
+        $postBodyIndent = $postBodyMatch.Groups["indent"].Value.Length
+      } else {
+        $inPostBody = $false
+        $postBodyIndent = -1
+      }
+      continue
+    }
+
+    if ($inPostBody) {
+      $out.Add((Replace-LineDateTimes -Line $line -TimestampValue $currentTimestamp -TransName $currentTransName)) | Out-Null
+      continue
+    }
+
+    $out.Add($line) | Out-Null
+  }
+
+  $updated = $out -join "`r`n"
+  $original = $lines -join "`r`n"
+  if ($updated -ne $original) {
+    Set-Content -Path $ScenarioYamlPath -Value $updated -Encoding UTF8
+  }
+
+  if ($state.AnnotationDefinitions.Count -gt 0) {
+    $state.AddedAnnotationCount = Ensure-ScenarioDataAnnotations -ScenarioDataPathArg $ScenarioDataPath -AnnotationDefinitionsArg $state.AnnotationDefinitions
+  }
+
+  if ([string]::IsNullOrWhiteSpace($ReplacementReportPath)) {
+    $reportDir = Split-Path -Path $ScenarioYamlPath -Parent
+    $ReplacementReportPath = Join-Path $reportDir ("datetime-annotation-replacements-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".html")
+  }
+  $state.ReportPath = Write-DateTimeReplacementReport -ReportPathArg $ReplacementReportPath -RowsArg @($state.Rows.ToArray())
+
+  if ($updated -ne $original) {
+    Write-Host "Normalized postBody datetime values: $ScenarioYamlPath (replacements=$($state.ReplacementCount), transactions=$($state.TouchedTransactions.Count), addedScenarioDataAnnotations=$($state.AddedAnnotationCount))"
+  } else {
+    Write-Host "No postBody datetime values matched normalization rules in: $ScenarioYamlPath"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($state.ReportPath)) {
+    Write-Host "Generated datetime replacement report: $($state.ReportPath)"
+  }
+
+  return @{
+    Replacements = $state.ReplacementCount
+    Transactions = $state.TouchedTransactions.Count
+    AddedAnnotations = $state.AddedAnnotationCount
+    ReportPath = $state.ReportPath
+  }
 }
 
 function ConvertTo-SafeFileSegment {
@@ -1609,8 +2055,11 @@ function Write-ConversionYamlReport {
     [string]$ConvertedDir,
     [string]$MoveToGlobalInitial,
     [string]$MoveToGlobalFinal,
+    [string]$Pass1ExtractedMoveToGlobal,
+    [string]$PromptProvidedMoveToGlobal,
     [string]$Pass2PriorityMoveToGlobalValue,
-    [bool]$SkipConverterUsernameArg
+    [bool]$SkipConverterUsernameArg,
+    [string]$ConverterJarUsed
   )
   if ([string]::IsNullOrWhiteSpace($ConvertedDir) -or -not (Test-Path $ConvertedDir)) { return @{} }
 
@@ -1633,6 +2082,8 @@ function Write-ConversionYamlReport {
 
   $moveInitial = if ([string]::IsNullOrWhiteSpace($MoveToGlobalInitial)) { "<none>" } else { $MoveToGlobalInitial }
   $moveFinal = if ([string]::IsNullOrWhiteSpace($MoveToGlobalFinal)) { "<none>" } else { $MoveToGlobalFinal }
+  $movePass1 = if ([string]::IsNullOrWhiteSpace($Pass1ExtractedMoveToGlobal)) { "<none>" } else { $Pass1ExtractedMoveToGlobal }
+  $movePrompt = if ([string]::IsNullOrWhiteSpace($PromptProvidedMoveToGlobal)) { "<none>" } else { $PromptProvidedMoveToGlobal }
   $priorityMove = if ([string]::IsNullOrWhiteSpace($Pass2PriorityMoveToGlobalValue)) { "<none>" } else { $Pass2PriorityMoveToGlobalValue }
   $usernameArgMode = if ($SkipConverterUsernameArg) { "omitted" } else { "passed as -username `${username}" }
 
@@ -1653,13 +2104,14 @@ function Write-ConversionYamlReport {
   $paramRows = @(
     @{ K = "Recording"; V = $RecordingName },
     @{ K = "Scenario"; V = $ScenarioName },
-    @{ K = "Host"; V = $HostName },
-    @{ K = "User"; V = $UserName },
+    @{ K = "Converter Jar"; V = $ConverterJarUsed },
     @{ K = "Target Alias"; V = $TargetAlias },
     @{ K = "DB Env"; V = $DbEnv },
     @{ K = "Time Zone"; V = $TimeZone },
     @{ K = "Converter Username Arg"; V = $usernameArgMode },
+    @{ K = "Prompt-provided move-to-global (locked priority)"; V = $movePrompt },
     @{ K = "Initial move-to-global"; V = $moveInitial },
+    @{ K = "Pass-1 extracted move-to-global (report only)"; V = $movePass1 },
     @{ K = "Pass-2 priority move-to-global"; V = $priorityMove },
     @{ K = "Final move-to-global"; V = $moveFinal }
   )
@@ -1667,6 +2119,37 @@ function Write-ConversionYamlReport {
     $html.Add("<tr><td>$(& $enc $row.K)</td><td><code>$(& $enc $row.V)</code></td></tr>") | Out-Null
   }
   $html.Add("</tbody></table>") | Out-Null
+
+  function Add-MoveToGlobalParamsTable {
+    param(
+      [string]$SectionTitle,
+      [string]$MoveToGlobalText
+    )
+
+    $html.Add("<h2>$(& $enc $SectionTitle)</h2>") | Out-Null
+    if ([string]::IsNullOrWhiteSpace($MoveToGlobalText)) {
+      $html.Add("<div><code>&lt;none&gt;</code></div>") | Out-Null
+      return
+    }
+
+    $map = Convert-MoveToGlobalStringToMap -MoveToGlobal $MoveToGlobalText
+    if (-not $map -or $map.Count -eq 0) {
+      $html.Add("<div><code>$(& $enc $MoveToGlobalText)</code></div>") | Out-Null
+      return
+    }
+
+    $html.Add("<table><thead><tr><th>key</th><th>value</th><th>pair (converter format)</th></tr></thead><tbody>") | Out-Null
+    foreach ($k in ($map.Keys | Sort-Object)) {
+      $v = [string]$map[$k]
+      $pair = "$v`:$k"
+      $html.Add("<tr><td><code>$(& $enc $k)</code></td><td><code>$(& $enc $v)</code></td><td><code>$(& $enc $pair)</code></td></tr>") | Out-Null
+    }
+    $html.Add("</tbody></table>") | Out-Null
+  }
+
+  Add-MoveToGlobalParamsTable -SectionTitle "Prompt-provided move-to-global params (locked priority)" -MoveToGlobalText $PromptProvidedMoveToGlobal
+  Add-MoveToGlobalParamsTable -SectionTitle "Pass-1 extracted move-to-global params" -MoveToGlobalText $Pass1ExtractedMoveToGlobal
+  Add-MoveToGlobalParamsTable -SectionTitle "Final pass-2 move-to-global params" -MoveToGlobalText $MoveToGlobalFinal
 
   $html.Add("<h2>Transaction Annotation Summary (scenario.yaml)</h2>") | Out-Null
   $html.Add("<table><thead><tr><th>Metric</th><th>Count</th></tr></thead><tbody>") | Out-Null
@@ -1707,9 +2190,9 @@ function Write-ConversionYamlReport {
   }
 }
 
-Assert-CommandAvailable -Name "ssh"
-Assert-CommandAvailable -Name "scp"
-Assert-CommandAvailable -Name "tar"
+Assert-CommandAvailable -Name "java"
+$ResolvedConverterJar = Resolve-LocalWorkflowConverterJar -ExplicitJarPath $ConverterJarPath
+Write-Host "Using local converter jar: $ResolvedConverterJar"
 
 Write-Host "Resolved DB environment for SQL identity lookup: $DbEnv"
 
@@ -1729,9 +2212,6 @@ if ($RecordingNames.Count -eq 0) {
 
 $sqlText = Get-Content -Raw $SqlFile
 $results = New-Object System.Collections.Generic.List[object]
-
-Write-Host "Validating remote jars..."
-Invoke-Ssh "ls -l /root/gatling/*.jar"
 
 foreach ($recordingName in $RecordingNames) {
   $recordingDir = Join-Path $RecordingsRoot $recordingName
@@ -1767,9 +2247,16 @@ foreach ($recordingName in $RecordingNames) {
   }
 
   $moveToGlobal = ""
+  $providedMap = [ordered]@{}
+  $providedMoveToGlobalNormalized = ""
   if (-not [string]::IsNullOrWhiteSpace($ProvidedMoveToGlobal)) {
-    $moveToGlobal = $ProvidedMoveToGlobal.Trim()
-    Write-Host "Using caller-provided --move-to-global exactly (auto-derive disabled for initial pass): $moveToGlobal"
+    $providedMap = Convert-MoveToGlobalStringToMap -MoveToGlobal $ProvidedMoveToGlobal
+    $moveToGlobal = Get-MoveToGlobalStringFromMap -MoveMap $providedMap
+    if ([string]::IsNullOrWhiteSpace($moveToGlobal)) {
+      $moveToGlobal = $ProvidedMoveToGlobal.Trim()
+    }
+    $providedMoveToGlobalNormalized = $moveToGlobal
+    Write-Host "Using caller-provided --move-to-global (normalized for converter): $moveToGlobal"
   } else {
     $moveToGlobal = Get-MoveToGlobalString -OrderedKeys $sqlKeys -ParamMap $paramMap
   }
@@ -1780,14 +2267,14 @@ foreach ($recordingName in $RecordingNames) {
     Write-Host "Initial --move-to-global pairs (pre pass-1): $moveToGlobal"
   }
 
-  $usernameOverrideSource = if (-not [string]::IsNullOrWhiteSpace($ProvidedMoveToGlobal)) { $ProvidedMoveToGlobal } else { $Pass2PriorityMoveToGlobal }
+  $usernameOverrideSource = if (-not [string]::IsNullOrWhiteSpace($providedMoveToGlobalNormalized)) { $providedMoveToGlobalNormalized } else { $Pass2PriorityMoveToGlobal }
   $skipConverterUsernameArg = Has-MultipleExplicitUsernames -PriorityMoveToGlobal $usernameOverrideSource
   if ($skipConverterUsernameArg) {
     Write-Host "Detected multiple explicit username overrides in pass-2 priority input; converter -username argument will be omitted."
   }
 
   # Pass 1 conversion.
-  $downloadRoot = Convert-RecordingRemote -RecordingDir $recordingDir -MoveToGlobal $moveToGlobal -SkipConverterUsernameArg $skipConverterUsernameArg
+  $downloadRoot = Convert-RecordingRemote -RecordingDir $recordingDir -MoveToGlobal $moveToGlobal -SkipConverterUsernameArg $skipConverterUsernameArg -ConverterJar $ResolvedConverterJar
   $convertedDir = Resolve-ConvertedScenarioDir -DownloadedRoot $downloadRoot
 
   # Derive identity values from pass-1 scenario-data and replies (authoritative source for dynamic values).
@@ -1807,18 +2294,56 @@ foreach ($recordingName in $RecordingNames) {
     Write-Warning "No usable username found from pass-1 data; SQL user_id lookup will rely only on explicit pass-2 username_* values."
   }
 
+  $pass1ExtractedMoveToGlobal = Get-MoveToGlobalStringFromMap -MoveMap $derivedMap
+  if ([string]::IsNullOrWhiteSpace($pass1ExtractedMoveToGlobal)) {
+    Write-Host "Pass-1 extracted move-to-global (report only): <none>"
+  } else {
+    Write-Host "Pass-1 extracted move-to-global (report only): $pass1ExtractedMoveToGlobal"
+  }
+
   if (-not $SkipSecondPassRefinement) {
-    Add-SqlUserIdsForAllUsernames -MoveMap $derivedMap -PriorityMoveToGlobal $Pass2PriorityMoveToGlobal -DbEnvironment $DbEnv -SqlplusScript $SqlplusScriptPath
+    $sqlPrioritySource = if (-not [string]::IsNullOrWhiteSpace($providedMoveToGlobalNormalized)) { $providedMoveToGlobalNormalized } else { $Pass2PriorityMoveToGlobal }
+    Add-SqlUserIdsForAllUsernames -MoveMap $derivedMap -PriorityMoveToGlobal $sqlPrioritySource -DbEnvironment $DbEnv -SqlplusScript $SqlplusScriptPath
 
-    Apply-Pass2PriorityMoveToGlobal -MoveMap $derivedMap -PriorityMoveToGlobal $Pass2PriorityMoveToGlobal
+    if (-not [string]::IsNullOrWhiteSpace($Pass2PriorityMoveToGlobal)) {
+      Apply-Pass2PriorityMoveToGlobal -MoveMap $derivedMap -PriorityMoveToGlobal $Pass2PriorityMoveToGlobal
+    }
+    if (-not [string]::IsNullOrWhiteSpace($providedMoveToGlobalNormalized)) {
+      # Prompt-provided move-to-global must be highest priority and never be overridden by pass-1 extracted values.
+      Apply-Pass2PriorityMoveToGlobal -MoveMap $derivedMap -PriorityMoveToGlobal $providedMoveToGlobalNormalized
+    }
 
-    $refinedMoveToGlobal = Get-MoveToGlobalStringFromMap -MoveMap $derivedMap
+    $refinedMapForPass2 = $derivedMap
+    if (-not [string]::IsNullOrWhiteSpace($providedMoveToGlobalNormalized) -and $providedMap.Count -gt 0) {
+      # Merge prompt-provided keys on top of pass-1 extracted identities.
+      # Explicit prompt keys remain highest priority, while non-conflicting pass-1 identities are retained.
+      $refinedMapForPass2 = [ordered]@{}
+      foreach ($k in $derivedMap.Keys) {
+        $refinedMapForPass2[$k] = [string]$derivedMap[$k]
+      }
+      foreach ($k in $providedMap.Keys) {
+        $refinedMapForPass2[$k] = [string]$providedMap[$k]
+      }
+      foreach ($providedKey in $providedMap.Keys) {
+        if ($providedKey -match '^username_(?<suffix>[a-z0-9]+)$') {
+          $uidKey = "user_id_$($matches['suffix'])"
+          if ($derivedMap.Contains($uidKey)) {
+            $refinedMapForPass2[$uidKey] = [string]$derivedMap[$uidKey]
+          }
+        } elseif ($providedKey -eq "username" -and $derivedMap.Contains("user_id")) {
+          $refinedMapForPass2["user_id"] = [string]$derivedMap["user_id"]
+        }
+      }
+      Write-Host "Prompt-provided move-to-global merged on top of pass-1 extracted values (prompt keys remain highest priority)."
+    }
+
+    $refinedMoveToGlobal = Get-MoveToGlobalStringFromMap -MoveMap $refinedMapForPass2
     if (-not [string]::IsNullOrWhiteSpace($refinedMoveToGlobal)) {
-      Write-Host "Refined --move-to-global pairs from pass-1 replies/scenario-data: $refinedMoveToGlobal"
+      Write-Host "Final pass-2 --move-to-global pairs: $refinedMoveToGlobal"
       if ($refinedMoveToGlobal -ne $moveToGlobal) {
         if (Test-Path $downloadRoot) { Remove-Item -Recurse -Force -Path $downloadRoot -ErrorAction SilentlyContinue }
         # Pass 2 conversion with replies-derived values.
-        $downloadRoot = Convert-RecordingRemote -RecordingDir $recordingDir -MoveToGlobal $refinedMoveToGlobal -SkipConverterUsernameArg $skipConverterUsernameArg
+        $downloadRoot = Convert-RecordingRemote -RecordingDir $recordingDir -MoveToGlobal $refinedMoveToGlobal -SkipConverterUsernameArg $skipConverterUsernameArg -ConverterJar $ResolvedConverterJar
         $convertedDir = Resolve-ConvertedScenarioDir -DownloadedRoot $downloadRoot
         $moveToGlobal = $refinedMoveToGlobal
       } else {
@@ -1837,14 +2362,69 @@ foreach ($recordingName in $RecordingNames) {
     }
   }
   Apply-UsernameAnnotationReplacements -ConvertedDir $convertedDir -MoveMap $derivedMap
+  $convertedScenarioYamlPath = Join-Path $convertedDir "scenario.yaml"
+  $convertedScenarioDataPathForNormalize = Join-Path $convertedDir "scenario-data.yaml"
+  $safeScenarioForDateTimeNormalization = ConvertTo-SafeFileSegment -Value $referenceName
+  $dateTimeReportDir = Join-Path $ConversionReportsRoot $safeScenarioForDateTimeNormalization
+  New-Item -ItemType Directory -Path $dateTimeReportDir -Force | Out-Null
+  $dateTimeReportPath = Join-Path $dateTimeReportDir ("datetime-annotation-replacements-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".html")
+  $dateTimeReportInScriptReportsPath = ""
+  [void](Normalize-ScenarioPostBodyDateTimesToCurrent `
+    -ScenarioYamlPath $convertedScenarioYamlPath `
+    -ScenarioDataPath $convertedScenarioDataPathForNormalize `
+    -ReplacementReportPath $dateTimeReportPath)
+  $scriptReportDir = Join-Path "C:/Users/prakash/Desktop/project/NBS/gatling/reports" $referenceName
+  New-Item -ItemType Directory -Path $scriptReportDir -Force | Out-Null
+  $dateTimeReportInScriptReportsPath = Join-Path $scriptReportDir (Split-Path -Path $dateTimeReportPath -Leaf)
+  Copy-Item -Path $dateTimeReportPath -Destination $dateTimeReportInScriptReportsPath -Force
   $conversionReport = Write-ConversionYamlReport `
     -RecordingName $recordingName `
     -ScenarioName $referenceName `
     -ConvertedDir $convertedDir `
     -MoveToGlobalInitial $initialMoveToGlobal `
     -MoveToGlobalFinal $moveToGlobal `
+    -Pass1ExtractedMoveToGlobal $pass1ExtractedMoveToGlobal `
+    -PromptProvidedMoveToGlobal $providedMoveToGlobalNormalized `
     -Pass2PriorityMoveToGlobalValue $Pass2PriorityMoveToGlobal `
-    -SkipConverterUsernameArg:$skipConverterUsernameArg
+    -SkipConverterUsernameArg:$skipConverterUsernameArg `
+    -ConverterJarUsed $ResolvedConverterJar
+  $annotationReportPath = ""
+  $safeScenarioForAnnotationReport = [regex]::Replace([string]$referenceName, '[^A-Za-z0-9_.-]', '_')
+  $annotationReportDir = Join-Path $AnnotationReportsRoot $safeScenarioForAnnotationReport
+  New-Item -ItemType Directory -Path $annotationReportDir -Force | Out-Null
+  $annotationReportFile = Join-Path $annotationReportDir ("annotation-values-report-" + $safeScenarioForAnnotationReport + "-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".html")
+  $convertedScenarioDataPath = Join-Path $convertedDir "scenario-data.yaml"
+  $convertedRepliesPaths = @(
+    Get-ChildItem -Path $convertedDir -File -Filter "replies*.yaml" -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty FullName
+  )
+
+  if (-not (Test-Path -LiteralPath $AnnotationReportScriptPath)) {
+    throw "Annotation report script not found: $AnnotationReportScriptPath"
+  }
+  if (-not (Test-Path -LiteralPath $convertedScenarioDataPath)) {
+    throw "Converted scenario-data.yaml not found for annotation report: $convertedScenarioDataPath"
+  }
+  if ($convertedRepliesPaths.Count -eq 0) {
+    throw "No replies*.yaml found in converted directory for annotation report: $convertedDir"
+  }
+
+  $annotationArgs = @(
+    "-NoProfile",
+    "-File", $AnnotationReportScriptPath,
+    "-ScenarioDataPath", $convertedScenarioDataPath,
+    "-RepliesYamlPaths"
+  )
+  $annotationArgs += $convertedRepliesPaths
+  $annotationArgs += @("-OutputHtmlPath", $annotationReportFile)
+  Invoke-External -Exe "pwsh" -CmdArgs $annotationArgs
+  $annotationReportPath = $annotationReportFile
+  $annotationReportInScriptReportsPath = ""
+  $scriptReportDirForAnnotation = Join-Path "C:/Users/prakash/Desktop/project/NBS/gatling/reports" $referenceName
+  New-Item -ItemType Directory -Path $scriptReportDirForAnnotation -Force | Out-Null
+  $annotationReportInScriptReportsPath = Join-Path $scriptReportDirForAnnotation (Split-Path -Path $annotationReportFile -Leaf)
+  Copy-Item -Path $annotationReportFile -Destination $annotationReportInScriptReportsPath -Force
+
   $scenarioNameForRunner = $referenceName
   $referenceDirPath = if ($reference) { $reference.FullName } else { "" }
   $runnerScenarioDir = Prepare-RunnerScenario -ScenarioName $scenarioNameForRunner -ConvertedDir $convertedDir -ReferenceDir $referenceDirPath -DerivedIdentityMap $derivedMap
@@ -1855,7 +2435,10 @@ foreach ($recordingName in $RecordingNames) {
     Converted = $convertedDir
     RunnerDir = $runnerScenarioDir
     MovePairs = $moveToGlobal
+    DateTimeAnnotationReport = $dateTimeReportInScriptReportsPath
     ConversionReport = if ($conversionReport) { [string]$conversionReport["HtmlPath"] } else { "" }
+    AnnotationReport = $annotationReportPath
+    AnnotationReportInScriptReports = $annotationReportInScriptReportsPath
   }) | Out-Null
 }
 
@@ -1869,6 +2452,15 @@ $results | ForEach-Object {
   Write-Host " - $($_.Scenario) <= $($_.Recording)"
   if (-not [string]::IsNullOrWhiteSpace([string]$_.ConversionReport)) {
     Write-Host "   conversion report: $($_.ConversionReport)"
+  }
+  if (-not [string]::IsNullOrWhiteSpace([string]$_.DateTimeAnnotationReport)) {
+    Write-Host "   datetime annotation report: $($_.DateTimeAnnotationReport)"
+  }
+  if (-not [string]::IsNullOrWhiteSpace([string]$_.AnnotationReport)) {
+    Write-Host "   annotation report: $($_.AnnotationReport)"
+  }
+  if (-not [string]::IsNullOrWhiteSpace([string]$_.AnnotationReportInScriptReports)) {
+    Write-Host "   annotation report (script reports): $($_.AnnotationReportInScriptReports)"
   }
 }
 

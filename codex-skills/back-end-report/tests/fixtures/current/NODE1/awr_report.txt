@@ -1,0 +1,5 @@
+Database: ABL Instance: ABL1
+Snapshot Begin: 200 End: 201 Duration: 90 minutes
+DB Time: 750 seconds
+DB CPU: 400 seconds
+

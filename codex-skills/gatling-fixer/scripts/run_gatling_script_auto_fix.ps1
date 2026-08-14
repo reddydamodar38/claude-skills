@@ -3,8 +3,10 @@ param(
   [string]$TargetAlias = "ablfhir",
   [int]$MaxIterations = 20,
   [switch]$SkipFailedRepliesRemoval,
-  [string]$ScriptRoot = "C:/Users/prakash/Desktop/project/NBS/gatling/script",
-  [string]$ReportsRoot = "C:/Users/prakash/Desktop/project/NBS/gatling/reports"
+  [string]$ScriptRoot = "C:/Gatling/converted",
+  [string]$ReportsRoot = "C:/Gatling/converted/reports",
+  [string]$RunnerScriptPath = "C:/Users/DP096786/.codex/skills/gatling-runner/scripts/run_gatling_remote.ps1",
+  [string]$RunnerKeyPath = "C:/Users/DP096786/.ssh/id_ed25519"
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,13 +30,14 @@ function Get-ReportFailures {
   }
 
   $html = Get-Content -Path $ReportPath -Raw
-  $pattern = "(?is)<tr><td><a href='[^']*'>(?<tx>.*?)</a></td><td><pre>(?<ko>.*?)</pre></td><td><pre>(?<reply>.*?)</pre></td><td><pre>(?<rec>.*?)</pre></td></tr>"
+  $pattern = "(?is)<tr><td><a href='[^']*'>(?<tx>.*?)</a></td><td><pre>(?<ko>.*?)</pre></td>(?:<td><pre>(?<status>.*?)</pre></td>)?<td><pre>(?<reply>.*?)</pre></td><td><pre>(?<rec>.*?)</pre></td></tr>"
   $matches = [regex]::Matches($html, $pattern)
 
   $rows = @()
   foreach ($m in $matches) {
     $tx = (Decode-Html $m.Groups["tx"].Value).Trim()
     $ko = (Decode-Html $m.Groups["ko"].Value).Trim()
+    $status = (Decode-Html $m.Groups["status"].Value).Trim()
     $reply = (Decode-Html $m.Groups["reply"].Value).Trim()
     $rec = (Decode-Html $m.Groups["rec"].Value).Trim()
 
@@ -43,9 +46,9 @@ function Get-ReportFailures {
     $reason = $null
     if ($reply -match "Failure in replies\.yaml") {
       $reason = "replies.yaml failure"
-    } elseif ($ko -match '(?i)\blocked\b' -or $reply -match '(?i)\blocked\b' -or $rec -match '(?i)\blocked\b' -or $ko -match '(?i)status\s*:\s*Z' -or $reply -match '(?i)status\s*:\s*Z') {
+    } elseif ($ko -match '(?i)\blocked\b' -or $status -match '(?i)\blocked\b' -or $reply -match '(?i)\blocked\b' -or $rec -match '(?i)\blocked\b' -or $ko -match '(?i)status\s*:\s*Z' -or $status -match '(?i)status\s*:\s*Z' -or $reply -match '(?i)status\s*:\s*Z') {
       $reason = "locked failure"
-    } elseif ($ko -match "Failed to build request" -or $reply -match "Failed to build request" -or $rec -match "Failed to build request" -or $ko -match "YAML evaluation" -or $reply -match "YAML evaluation" -or $rec -match "YAML evaluation") {
+    } elseif ($ko -match "Failed to build request" -or $status -match "Failed to build request" -or $reply -match "Failed to build request" -or $rec -match "Failed to build request" -or $ko -match "YAML evaluation" -or $status -match "YAML evaluation" -or $reply -match "YAML evaluation" -or $rec -match "YAML evaluation") {
       $reason = "request build failure"
     }
 
@@ -54,6 +57,7 @@ function Get-ReportFailures {
         Transaction = $tx
         Reason = $reason
         KO = $ko
+        ResponseStatus = $status
         Replies = $reply
         Recording = $rec
         Source = "html"
@@ -73,6 +77,7 @@ function Get-LatestScenarioReportPath {
   $scenarioReportDir = Join-Path $ReportsDir $Scenario
   if (Test-Path -Path $scenarioReportDir) {
     $latest = Get-ChildItem -Path $scenarioReportDir -File -Filter "$Scenario-*.html" -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -notlike '*-autofix-report.html' } |
       Sort-Object LastWriteTime -Descending |
       Select-Object -First 1
     if ($latest) {
@@ -287,6 +292,34 @@ function Get-TokensFromOutForTransaction {
   return @($tokens | Select-Object -Unique)
 }
 
+function Get-OutTokensByTransaction {
+  param([string]$OutPath)
+
+  $map = @{}
+  if (-not (Test-Path -Path $OutPath)) { return $map }
+
+  $linePattern = '^\s*>\s*(?<tx>[A-Za-z0-9_\-]+):\s*(?<msg>.+)$'
+  $detailedLinePattern = "(?i)'(?<tx>[A-Za-z0-9_\-]+)'\s+failed\s+to\s+execute:\s*(?<msg>.+)$"
+  $tokenPattern = '\$\{[^}]+\}'
+  foreach ($line in (Get-Content -Path $OutPath)) {
+    $m = [regex]::Match($line, $linePattern)
+    if (-not $m.Success) {
+      $m = [regex]::Match($line, $detailedLinePattern)
+    }
+    if (-not $m.Success) { continue }
+
+    $tx = $m.Groups['tx'].Value.Trim()
+    foreach ($tm in [regex]::Matches($m.Groups['msg'].Value, $tokenPattern)) {
+      if (-not $map.ContainsKey($tx)) {
+        $map[$tx] = New-Object 'System.Collections.Generic.HashSet[string]'
+      }
+      [void]$map[$tx].Add($tm.Value)
+    }
+  }
+
+  return $map
+}
+
 function Get-TokensFromHtmlForTransaction {
   param(
     [Parameter(Mandatory = $true)][object[]]$ReportFailures,
@@ -301,6 +334,7 @@ function Get-TokensFromHtmlForTransaction {
 
     $text = @(
       [string]$row.KO,
+      [string]$row.ResponseStatus,
       [string]$row.Replies,
       [string]$row.Recording
     ) -join " "
@@ -330,28 +364,43 @@ function Get-ReplyJsonFromReplies {
     return $null
   }
 
-  $escapedTx = [regex]::Escape($TransactionName)
-  $pattern = "(?ms)^\s*-\s*transName:\s*`"$escapedTx`"\s*\r?\n\s*replyBody:\s*\|-\s*\r?\n(?<body>(?:\s{6,}.*(?:\r?\n|$))*)"
-  $raw = Get-Content -Path $RepliesPath -Raw
-  $m = [regex]::Match($raw, $pattern)
-  if (-not $m.Success) {
+  $bodyLines = New-Object System.Collections.Generic.List[string]
+  $foundTransaction = $false
+  $reader = [System.IO.StreamReader]::new($RepliesPath)
+  try {
+    while (($line = $reader.ReadLine()) -ne $null) {
+      $txMatch = [regex]::Match($line, '^\s*-\s*transName:\s*"([^"]+)"')
+      if ($txMatch.Success) {
+        if ($foundTransaction) { break }
+        if ($txMatch.Groups[1].Value.Trim().Equals($TransactionName, [System.StringComparison]::OrdinalIgnoreCase)) {
+          $foundTransaction = $true
+        }
+        continue
+      }
+
+      if (-not $foundTransaction) { continue }
+      if ($line -match '^\s*replyBody:\s*\|-\s*$') { continue }
+      if ($line -match '^\s{6}(.*)$') {
+        $bodyLines.Add($Matches[1]) | Out-Null
+      }
+    }
+  } finally {
+    $reader.Dispose()
+  }
+
+  if (-not $foundTransaction) {
     $ReplyCache[$TransactionName] = $null
     return $null
   }
 
-  $bodyLines = @()
-  foreach ($line in ($m.Groups["body"].Value -split "`r?`n")) {
-    if ($line -eq "") { continue }
-    $bodyLines += ($line -replace '^\s{6}', '')
-  }
-  $jsonText = ($bodyLines -join "`n").Trim()
+  $jsonText = (($bodyLines.ToArray()) -join "`n").Trim()
   if ([string]::IsNullOrWhiteSpace($jsonText)) {
     $ReplyCache[$TransactionName] = $null
     return $null
   }
 
   try {
-    $obj = $jsonText | ConvertFrom-Json -Depth 100
+    $obj = $jsonText | ConvertFrom-Json
     $ReplyCache[$TransactionName] = $obj
     return $obj
   } catch {
@@ -489,7 +538,7 @@ function Replace-TokenInScenarioFiles {
     }
   }
 
-  return @($changed)
+  return $changed.ToArray()
 }
 
 function New-IterationScenarioBackups {
@@ -508,7 +557,7 @@ function New-IterationScenarioBackups {
     $created.Add($backupPath) | Out-Null
   }
 
-  return @($created)
+  return $created.ToArray()
 }
 
 function Get-ScenarioTransactionBlocks {
@@ -648,7 +697,7 @@ function Normalize-PatientTrackingListIndexZero {
     }
   }
 
-  return @($changes)
+  return $changes.ToArray()
 }
 
 $scenarioDir = Join-Path $ScriptRoot $ScenarioName
@@ -665,7 +714,7 @@ if (-not (Test-Path -Path $repliesPath)) {
   throw "replies.yaml not found: $repliesPath"
 }
 
-$runnerScript = "C:/Users/prakash/.codex/skills/gatling-runner/scripts/run_gatling_remote.ps1"
+$runnerScript = $RunnerScriptPath
 if (-not (Test-Path -Path $runnerScript)) {
   throw "gatling-runner script not found: $runnerScript"
 }
@@ -719,7 +768,7 @@ for ($iter = 1; $iter -le $MaxIterations; $iter++) {
   $log.Add("Running gatling-runner...")
 
   try {
-    & $runnerScript -ScenarioName $ScenarioName -TargetAlias $TargetAlias
+    & $runnerScript -ScenarioName $ScenarioName -TargetAlias $TargetAlias -KeyPath $RunnerKeyPath -LocalScriptRoot $ScriptRoot -LocalReportsDir $ReportsRoot
     $log.Add("- Run status: success")
   } catch {
     $log.Add("- Run status: failed")
@@ -796,11 +845,22 @@ for ($iter = 1; $iter -le $MaxIterations; $iter++) {
 
   $buildFixApplied = $false
   if ($buildOnly.Count -gt 0) {
+    $outTokenMap = @{}
+    if (-not [string]::IsNullOrWhiteSpace($outPath)) {
+      $outTokenMap = Get-OutTokensByTransaction -OutPath $outPath
+    }
     $orderedBuildFailures = @($buildOnly | Sort-Object @{Expression = { Get-TransactionOrder -TransactionName $_.Transaction }}, @{Expression = { $_.Transaction }})
     foreach ($bf in $orderedBuildFailures) {
       $tokens = @()
-      if (-not [string]::IsNullOrWhiteSpace($outPath)) {
-        $tokens = Get-TokensFromOutForTransaction -OutPath $outPath -TransactionName $bf.Transaction
+      if ($outTokenMap.ContainsKey($bf.Transaction)) {
+        $tokens = @($outTokenMap[$bf.Transaction])
+      } else {
+        foreach ($txKey in $outTokenMap.Keys) {
+          if (Match-Transaction -ScenarioTx $bf.Transaction -ReportTx $txKey) {
+            $tokens = @($outTokenMap[$txKey])
+            break
+          }
+        }
       }
       if ($tokens.Count -eq 0) {
         $tokens = Get-TokensFromHtmlForTransaction -ReportFailures $reportFailures -TransactionName $bf.Transaction
@@ -943,6 +1003,3 @@ $html = @"
 "@
 [System.IO.File]::WriteAllText($autoFixReportPath, $html, [System.Text.Encoding]::UTF8)
 Write-Host "Auto-fix report written: $autoFixReportPath"
-
-
-

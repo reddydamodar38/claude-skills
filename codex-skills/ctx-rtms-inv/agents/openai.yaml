@@ -1,0 +1,4 @@
+interface:
+  display_name: "CTX-RTMS-Inv"
+  short_description: "Investigate DB, APP, Citrix, EJS, SCP, and RTMS"
+  default_prompt: "Use $ctx-rtms-inv to compare baseline and current ABLCAPUTIL runs across DB, Application, and Citrix tiers and produce a detailed RCA."

@@ -1,0 +1,2 @@
+database=ABL instance=ABL1 SGA_MB=4096 PGA_MB=1024 DB_TIME_S=600 DB_CPU_S=300
+

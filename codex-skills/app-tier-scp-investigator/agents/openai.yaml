@@ -1,0 +1,4 @@
+interface:
+  display_name: "App Tier & SCP Investigator"
+  short_description: "Analyze App-tier EJS, SCP, memory, Xmx, and GC"
+  default_prompt: "Use $app-tier-scp-investigator to compare Insight and ABLCAPUTIL runs for App-tier EJS/SCP memory, Xmx, GC, and sign-off findings."

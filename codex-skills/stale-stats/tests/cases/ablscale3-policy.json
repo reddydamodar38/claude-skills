@@ -1,0 +1,12 @@
+{
+  "stale_stats_domain": "ablscale3",
+  "expected_effective": [
+    "DM_INFO",
+    "DM_STAT_TABLE",
+    "DM_PROCESS_EVENT",
+    "DM_PROCESS",
+    "DM_PROCESS_QUEUE",
+    "HE_JOB",
+    "MP_GROUP_REFRESH_STATE"
+  ]
+}

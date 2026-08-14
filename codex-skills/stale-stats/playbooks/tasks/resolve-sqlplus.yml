@@ -1,0 +1,23 @@
+- name: Resolve SQLPlus from the Oracle login environment
+  ansible.builtin.shell: /bin/ksh -l -c 'command -v sqlplus'
+  args:
+    executable: /bin/sh
+  register: stale_stats_sqlplus_path
+  changed_when: false
+  failed_when: stale_stats_sqlplus_path.rc != 0 or stale_stats_sqlplus_path.stdout | trim | length == 0
+- name: Resolve ORACLE_HOME from the Oracle login environment
+  ansible.builtin.shell: /bin/ksh -l -c 'printf %s "$ORACLE_HOME"'
+  args:
+    executable: /bin/sh
+  register: stale_stats_oracle_home
+  changed_when: false
+  failed_when:
+    - stale_stats_oracle_home.rc != 0 or stale_stats_oracle_home.stdout | trim | length == 0
+- name: Resolve ORACLE_SID from the Oracle login environment
+  ansible.builtin.shell: /bin/ksh -l -c 'printf %s "$ORACLE_SID"'
+  args:
+    executable: /bin/sh
+  register: stale_stats_oracle_sid
+  changed_when: false
+  failed_when:
+    - stale_stats_oracle_sid.rc != 0 or stale_stats_oracle_sid.stdout | trim | length == 0

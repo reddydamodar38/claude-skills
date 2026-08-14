@@ -102,4 +102,3 @@ Duration + SuiteInfo normalization example:
 ## Foreground Default
 - Default execution mode is foreground.
 - Use background execution only when the user explicitly requests it.
-

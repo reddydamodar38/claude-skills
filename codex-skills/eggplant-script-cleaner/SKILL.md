@@ -59,7 +59,6 @@ Verification execution policy:
 - Data integrity gate: require DataLoader syntax/structure checks and CSV integrity checks as completion criteria for edit modes; in Dry Run, include these checks in the proposed execution plan and expected outcomes before asking to apply edits.
 - Secondary-user handoff gate: always run a dedicated check for secondary Millennium login paths (`millUsername2` or higher). If a secondary login exists and the pre-launch fresh-session reset block is missing, add the reset-and-relaunch guardrail before continuing validation.
 - DataLoader control-flow gate: never remove, collapse, or rewrite the DataLoader functional/performance control-flow guard (If (the number of keys in performance_data is 0) ... Else ... End If). Preserve this block structure in every mode (Fast, Normal, and Dry Run).
-- DataLoader credential-branch gate: DH2/FEDA credential and citrixShortcut edits are allowed only inside the functional branch (If (the number of keys in performance_data is 0)). Never add, move, comment/uncomment, or rewrite DH2/FEDA credential lines inside the Else branch.
 
 ## Workflow
 
@@ -419,9 +418,7 @@ Precedence rule for `citrixApp` cleanup:
 Use these homes:
 
 - `millUsername*`, `millPassword*` -> `*_LoginData.csv`
-- LoginData username header rule: use numbered `millUsername#` CSV headers only when active `millUsername#` variables exist in the DataLoader; otherwise use regular `millUsername`. Do not infer numbered login headers from comments or from unrelated CSV shape.
 - FINs, patient names, order names, subjects, and similar workflow inputs -> `*_WorkflowData.csv`
-- FIN source-of-truth rule: if any DataLoader hardcoded `*FIN*` variable value differs from `*_WorkflowData.csv`, treat the DataLoader value as authoritative and update the CSV to match; never overwrite DataLoader FIN defaults from CSV values
 - `citrixShortcut` -> `*_WorkflowData.csv` under the existing app header, usually `PowerChart`, `RevenueCycle`, or `AppBar`
 - if the workflow truly launches multiple Citrix apps, keep one shortcut variable per launch target such as `citrixShortcut1`, `citrixShortcut2`, and `citrixShortcut3`, and map each one to the matching workflow-data app header instead of collapsing them into a single shortcut
 - keep `sutUsername`, `sutPassword`, and `sutUsername*`/`sutPassword*` hardcoded in the DataLoader credential block; do not move SUT credentials into `*_SutUsers.csv`
@@ -569,7 +566,6 @@ Set citrixShortcut = ""
 ```
 
 Keep the DH2 block commented and the FEDA block active. Do not replace an existing DH2 username with `dh2\xaauto022`.
-Apply this DH2/FEDA toggle rule only within the functional branch (If (the number of keys in performance_data is 0)). Do not perform DH2/FEDA edits in the Else (performance_data) branch.
 Keep SUT credential assignment in this DataLoader block; do not externalize SUT credentials to `*_SutUsers.csv`.
 Do not auto-add `sutUsername` or `sutPassword` columns to `Resources/<wfName>_LoginData.csv` when they are sourced from a static/shared location. Preserve existing LoginData header shape and keep it Millennium-login focused (`millUsername*`, `millPassword`) unless the workflow already explicitly uses SUT columns there.
 

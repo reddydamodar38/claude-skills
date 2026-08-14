@@ -37,12 +37,13 @@ $legacySkills = @(
     }
 )
 $scanRoots = @($collectionSkills) + @($legacySkills)
-$forbiddenDirectoryNames = @('.git', '.skill-build', 'outputs', '__pycache__')
+$forbiddenDirectoryNames = @('.git', '.skill-build', '.codex-gatling-batch-work', 'outputs', '__pycache__')
 $textExtensions = @('.md', '.ps1', '.py', '.sh', '.yaml', '.yml', '.json', '.toml', '.txt', '.csv')
 $privateKeyPattern = '-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----'
 $tokenPattern = '(?:ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})'
-$assignmentPattern = '(?i)\b(password|passwd|secret|api[_-]?key)\b\s*[:=]\s*(?<value>[^\s#;,}]+)'
+$assignmentPattern = '(?i)(?<![A-Za-z0-9_-])[`"'']?(?:(?:default|forced(?:config|scenariodata)?|db|database)[_-]?)?(password|passwd|secret|api[_-]?key)\b[`"'']?\s*[:=]\s*(?<value>[^\s#;,}]+)'
 $safeAssignmentPattern = '^(?:\$|\$\{|<|\[|\{|ConvertTo-|Get-|Read-|None$|null$|example|placeholder|REPLACE_|REDACTED)'
+$pythonTypeAnnotationPattern = '(?i)\b(password|passwd|secret|api[_-]?key)\b\s*:\s*[A-Za-z_][A-Za-z0-9_.\[\], |]*(?=[,)=]|$)'
 
 foreach ($scanRoot in $scanRoots) {
   $nestedDirectories = @(
@@ -83,7 +84,10 @@ foreach ($scanRoot in $scanRoots) {
       }
       $assignment = [regex]::Match($line, $assignmentPattern)
       if ($assignment.Success) {
-        $value = $assignment.Groups['value'].Value.Trim(("'`"").ToCharArray())
+        if ($file.Extension -eq '.py' -and $line -match $pythonTypeAnnotationPattern) {
+          continue
+        }
+        $value = $assignment.Groups['value'].Value.Trim([char[]]@([char]39, [char]34, [char]96))
         if ($value -notmatch $safeAssignmentPattern) {
           $violations.Add("literal credential assignment: $($file.FullName):$lineNumber")
         }

@@ -1,0 +1,28 @@
+---
+- name: Verify production Oracle environment supports a read-only SQLPlus query
+  hosts: primaryDB
+  gather_facts: false
+  become: true
+  become_user: oracle
+  tasks:
+    - name: Load production SQLPlus and Oracle environment resolution
+      ansible.builtin.import_tasks: /skill/playbooks/tasks/resolve-sqlplus.yml
+
+    - name: Run a harmless SQLPlus readiness query
+      ansible.builtin.shell: |
+        "{{ stale_stats_sqlplus_path.stdout | trim }}" -s / as sysdba <<'SQL'
+        whenever sqlerror exit sql.sqlcode
+        set heading off feedback off pagesize 0 verify off echo off
+        select 'SQLPLUS_READY=YES' from dual;
+        exit
+        SQL
+      args:
+        executable: /bin/ksh
+      environment:
+        ORACLE_HOME: "{{ stale_stats_oracle_home.stdout | trim }}"
+        ORACLE_SID: "{{ stale_stats_oracle_sid.stdout | trim }}"
+      register: sqlplus_readiness
+      changed_when: false
+      failed_when:
+        - sqlplus_readiness.rc != 0
+        - "'SQLPLUS_READY=YES' not in sqlplus_readiness.stdout"

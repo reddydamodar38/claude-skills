@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stale Stats"
+  short_description: "Gather and publish Millennium stale statistics"
+  default_prompt: "Use $stale-stats to collect and publish stale database statistics for ablscale3 through TACO."

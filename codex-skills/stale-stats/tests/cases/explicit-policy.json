@@ -1,0 +1,9 @@
+{
+  "stale_stats_domain": "ablscale3",
+  "stale_stats_expected_not_queued": [
+    "ONLY_THIS"
+  ],
+  "expected_effective": [
+    "ONLY_THIS"
+  ]
+}

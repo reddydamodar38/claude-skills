@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gatling Docker Test Runner"
+  short_description: "Run prepared Gatling tests on INJABLFEDA001"
+  default_prompt: "Use $gatling-docker-test-runner to validate and run a prepared ABLFEDA Gatling test folder on INJABLFEDA001."

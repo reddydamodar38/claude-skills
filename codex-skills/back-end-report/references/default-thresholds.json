@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0",
+  "memory": { "rss_delta_mb": { "medium": 20, "high": 100 } },
+  "gc": { "after_gc_delta_pct": { "medium": 20, "high": 50 }, "pause_delta_pct": { "medium": 25, "high": 75 } },
+  "database": { "delta_pct": { "medium": 15, "high": 30 } },
+  "awr": { "delta_pct": { "medium": 15, "high": 30 }, "duration_tolerance_pct": 10, "workload_tolerance_pct": 20 },
+  "sql": { "avg_elapsed_delta_pct": { "medium": 25, "high": 50 }, "minimum_current_executions": 1 },
+  "ndump": { "delta_count": { "medium": 1, "high": 3 } },
+  "cmb": { "new_warnings_errors": { "medium": 1, "high": 5 } }
+}

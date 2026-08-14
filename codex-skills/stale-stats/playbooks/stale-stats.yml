@@ -1,0 +1,320 @@
+- name: Select stale-stat application targets
+  hosts: localhost
+  gather_facts: false
+  vars:
+    stale_stats_allowed_actions:
+      - restorepoint
+      - replace-restorepoint
+      - preflight
+      - preview
+      - queue
+      - runners
+      - status
+      - publish
+      - audit
+    stale_stats_db_actions:
+      - restorepoint
+      - replace-restorepoint
+    stale_stats_primary_hosts: "{{ groups.get('primaryApp', []) }}"
+    stale_stats_database_candidates: >-
+      {{ (groups.get('primaryDB', []) + groups.get('database', []) + groups.get('db', [])) | unique | list }}
+    stale_stats_database_host: "{{ stale_stats_db_host | default(stale_stats_database_candidates[0] | default(''), true) }}"
+    stale_stats_application_hosts: >-
+      {{ (groups.get('primaryApp', []) + groups.get('additionalApp', [])) | unique | list }}
+    stale_stats_shared_actions:
+      - preview
+      - queue
+      - publish
+  tasks:
+    - name: Validate requested domain, action, and inventory groups
+      ansible.builtin.assert:
+        that:
+          - stale_stats_domain | default('') | length > 0
+          - stale_stats_domain is match('^[A-Za-z0-9_-]+$')
+          - stale_stats_action | default('') in stale_stats_allowed_actions
+          - stale_stats_action in stale_stats_db_actions or stale_stats_primary_hosts | length > 0
+          - stale_stats_action in stale_stats_db_actions or stale_stats_application_hosts | length > 0
+          - stale_stats_action not in stale_stats_db_actions or stale_stats_database_host | length > 0
+          - stale_stats_action not in stale_stats_db_actions or (stale_stats_restore_point_name | default('ABL_RESTORE_POINT')) is match('^[A-Za-z][A-Za-z0-9_$#]*$')
+          - stale_stats_action != 'replace-restorepoint' or (stale_stats_confirm_replace | default(false) | bool)
+        fail_msg: >-
+          Provide a safe stale_stats_domain, a supported action, the required
+          inventory groups, and explicit confirmation for replacement.
+
+    - name: Add selected database host to the runtime group
+      ansible.builtin.add_host:
+        name: "{{ stale_stats_database_host }}"
+        groups: stale_stats_db_targets
+      when: stale_stats_action in stale_stats_db_actions
+      changed_when: false
+
+    - name: Add selected application hosts to the runtime group
+      ansible.builtin.add_host:
+        name: "{{ item }}"
+        groups: stale_stats_targets
+        stale_stats_is_primary: "{{ item == stale_stats_primary_hosts[0] }}"
+      loop: >-
+        {{ [] if stale_stats_action in stale_stats_db_actions
+           else ([stale_stats_primary_hosts[0]] if stale_stats_action in stale_stats_shared_actions
+                 else stale_stats_application_hosts) }}
+      changed_when: false
+
+- name: Run the requested Oracle restore-point operation
+  hosts: stale_stats_db_targets
+  gather_facts: false
+  any_errors_fatal: true
+  become: true
+  become_user: "{{ stale_stats_db_os_user | default('oracle') }}"
+  vars:
+    stale_stats_restore_point_effective: "{{ stale_stats_restore_point_name | default('ABL_RESTORE_POINT') }}"
+  tasks:
+    - name: Apply restore-point request validation
+      ansible.builtin.import_tasks: tasks/validate-restorepoint-request.yml
+
+    - name: Resolve SQLPlus executable
+      ansible.builtin.import_tasks: tasks/resolve-sqlplus.yml
+
+    - name: Create and verify the Oracle restore point
+      ansible.builtin.shell: |
+        set -o pipefail
+        "{{ stale_stats_sqlplus_path.stdout | trim }}" -s / as sysdba <<'SQL'
+        whenever sqlerror exit sql.sqlcode rollback
+        set heading off feedback off pagesize 0 linesize 400 trimspool on verify off echo off
+        select 'DATABASE=' || name || '|OPEN_MODE=' || open_mode from v$database;
+        declare
+          existing_count number;
+        begin
+          select count(*) into existing_count
+            from v$restore_point
+           where name = upper('{{ stale_stats_restore_point_effective }}');
+          if existing_count > 0 then
+            raise_application_error(-20001,
+              'Restore point already exists: {{ stale_stats_restore_point_effective }}');
+          end if;
+        end;
+        /
+        create restore point {{ stale_stats_restore_point_effective | upper }};
+        select 'RESTORE_POINT=' || name || '|SCN=' || scn
+          from v$restore_point
+         where name = upper('{{ stale_stats_restore_point_effective }}');
+        exit
+        SQL
+      args:
+        executable: /bin/ksh
+      environment:
+        ORACLE_HOME: "{{ stale_stats_oracle_home.stdout | trim }}"
+        ORACLE_SID: "{{ stale_stats_oracle_sid.stdout | trim }}"
+      register: stale_stats_restorepoint
+      changed_when: true
+      failed_when: >-
+        stale_stats_restorepoint.rc != 0 or
+        'DATABASE=' not in stale_stats_restorepoint.stdout or
+        'RESTORE_POINT=' not in stale_stats_restorepoint.stdout
+      when: stale_stats_action == 'restorepoint'
+
+    - name: Replace and verify the guaranteed Oracle restore point
+      ansible.builtin.shell: |
+        set -o pipefail
+        "{{ stale_stats_sqlplus_path.stdout | trim }}" -s / as sysdba <<'SQL'
+        whenever sqlerror exit sql.sqlcode rollback
+        set heading off feedback off pagesize 0 linesize 400 trimspool on verify off echo off serveroutput on
+        select 'DATABASE=' || name || '|OPEN_MODE=' || open_mode || '|FLASHBACK_ON=' || flashback_on
+          from v$database;
+        select 'OLD_RESTORE_POINT=' || name || '|SCN=' || scn || '|TIME=' ||
+               to_char(time, 'YYYY-MM-DD"T"HH24:MI:SS.FF3') ||
+               '|GUARANTEE=' || guarantee_flashback_database
+          from v$restore_point
+         where name = upper('{{ stale_stats_restore_point_effective }}');
+        declare
+          existing_count number;
+        begin
+          select count(*) into existing_count
+            from v$restore_point
+           where name = upper('{{ stale_stats_restore_point_effective }}');
+          if existing_count > 0 then
+            execute immediate 'drop restore point {{ stale_stats_restore_point_effective | upper }}';
+            dbms_output.put_line('DROPPED_RESTORE_POINT={{ stale_stats_restore_point_effective | upper }}');
+          else
+            dbms_output.put_line('NO_EXISTING_RESTORE_POINT={{ stale_stats_restore_point_effective | upper }}');
+          end if;
+        end;
+        /
+        create restore point {{ stale_stats_restore_point_effective | upper }} guarantee flashback database;
+        select 'NEW_RESTORE_POINT=' || name || '|SCN=' || scn || '|TIME=' ||
+               to_char(time, 'YYYY-MM-DD"T"HH24:MI:SS.FF3') ||
+               '|GUARANTEE=' || guarantee_flashback_database
+          from v$restore_point
+         where name = upper('{{ stale_stats_restore_point_effective }}');
+        exit
+        SQL
+      args:
+        executable: /bin/ksh
+      environment:
+        ORACLE_HOME: "{{ stale_stats_oracle_home.stdout | trim }}"
+        ORACLE_SID: "{{ stale_stats_oracle_sid.stdout | trim }}"
+      register: stale_stats_replace_restorepoint
+      changed_when: true
+      failed_when: >-
+        stale_stats_replace_restorepoint.rc != 0 or
+        'DATABASE=' not in stale_stats_replace_restorepoint.stdout or
+        ('NEW_RESTORE_POINT=' ~ (stale_stats_restore_point_effective | upper)) not in stale_stats_replace_restorepoint.stdout or
+        stale_stats_replace_restorepoint.stdout is not search('NEW_RESTORE_POINT=.*[|]GUARANTEE=YES')
+      when: stale_stats_action == 'replace-restorepoint'
+
+    - name: Report restore-point verification
+      ansible.builtin.debug:
+        msg: "{{ stale_stats_restorepoint.stdout_lines }}"
+      when: stale_stats_action == 'restorepoint'
+
+    - name: Report replacement restore-point verification
+      ansible.builtin.debug:
+        msg: "{{ stale_stats_replace_restorepoint.stdout_lines }}"
+      when: stale_stats_action == 'replace-restorepoint'
+
+- name: Run the requested Millennium stale-stat operation
+  hosts: stale_stats_targets
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - ../vars/expected-not-queued.json
+  vars:
+    stale_stats_expected_not_queued_derived: >-
+      {{ stale_stats_expected_not_queued_defaults
+         + stale_stats_expected_not_queued_by_domain.get(stale_stats_domain | lower, []) }}
+    stale_stats_expected_not_queued_effective: >-
+      {{ stale_stats_expected_not_queued | default(stale_stats_expected_not_queued_derived) }}
+    stale_stats_launch_actions:
+      - preview
+      - queue
+      - runners
+      - publish
+    stale_stats_operation_name: >-
+      {{ 'runner' if stale_stats_action == 'runners' else stale_stats_action }}
+    stale_stats_script_path: >-
+      /tmp/codex_dbstats_{{ stale_stats_operation_name }}_{{ inventory_hostname_short }}.ksh
+    stale_stats_ccl_commands:
+      preview: |
+        set message noinformation go
+        dm2_queue_dbstats 'ALL','*','*','*','*','PREVIEW_STALE' go
+      queue: |
+        set message noinformation go
+        dm2_queue_dbstats 'ALL','*','*','*','*','QUEUE_STALE' go
+      runners: |
+        set message noinformation go
+        dm2_dbstats_runner go
+      publish: |
+        set message noinformation go
+        dm2_publish_dbstats '*','*','PUBLISH' go
+  tasks:
+    - name: Resolve and validate the Millennium login runtime
+      ansible.builtin.shell: |
+        environment_path=$(/cerner/mgr/linuxx86-64/get_definition -env {{ stale_stats_domain | quote }} -def LIBPATH)
+        if [[ -z "$environment_path" ]]; then print -u2 "LIBPATH resolution failed"; exit 10; fi
+        PATH="$PATH:$environment_path"; LIBPATH="$environment_path"; export PATH LIBPATH
+        local_user=$(lreg -getp '\environment\\{{ stale_stats_domain }}' localusername 2>/dev/null)
+        if [[ -z "$local_user" ]]; then print -u2 "Registry localusername lookup failed"; exit 11; fi
+        local_group=$(id -gn "$local_user") || exit 12
+        runtime=$(sg "$local_group" -c '/bin/ksh -l -c '\''
+          print "ENVIRONMENT=$environment"
+          print "CER_TEMP=$cer_temp"
+          print "CER_EXE=$cer_exe"
+          [[ -d "$cer_temp" ]] || exit 20
+          [[ -x "$cer_exe/cclora" ]] || exit 21
+        '\''') || exit 13
+        print "LOCAL_USER=$local_user"; print "LOCAL_GROUP=$local_group"; print "$runtime"
+        resolved_environment=$(print "$runtime" | sed -n 's/^ENVIRONMENT=//p' | tail -1)
+        if [[ "$(print "$resolved_environment" | tr '[:upper:]' '[:lower:]')" != "$(print {{ stale_stats_domain | quote }} | tr '[:upper:]' '[:lower:]')" ]]; then
+          print -u2 "Resolved environment does not match requested domain"; exit 14
+        fi
+      args:
+        executable: /bin/ksh
+      register: stale_stats_runtime
+      changed_when: false
+      no_log: false
+
+    - name: Report validated runtime without credentials
+      ansible.builtin.debug:
+        msg: "{{ stale_stats_runtime.stdout_lines }}"
+
+    - name: Install the skill-owned detached operation script
+      ansible.builtin.copy:
+        dest: "{{ stale_stats_script_path }}"
+        mode: '0700'
+        content: |
+          #!/bin/ksh
+          operation={{ stale_stats_operation_name | quote }}
+          host_short=$(hostname -s); suffix=""
+          if [[ "$operation" = "runner" ]]; then suffix="_${host_short}"; fi
+          log="${cer_temp}/codex_dbstats_${operation}${suffix}.log"
+          done_marker="${cer_temp}/codex_dbstats_${operation}${suffix}.done"
+          {
+            print "STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)"; print "HOST=$(hostname)"
+            cat <<'CCL' | "$cer_exe/cclora"
+          {{ stale_stats_ccl_commands[stale_stats_action] | indent(2, false) }}
+          CCL
+            rc=$?; print "CCL_RC=$rc"; print "FINISHED=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$log" 2>&1
+          print "$rc" > "$done_marker"
+          rm -f "{{ stale_stats_script_path }}"
+      when: stale_stats_action in stale_stats_launch_actions
+
+    - name: Start the detached operation without duplicating a live skill job
+      ansible.builtin.shell: |
+        environment_path=$(/cerner/mgr/linuxx86-64/get_definition -env {{ stale_stats_domain | quote }} -def LIBPATH)
+        PATH="$PATH:$environment_path"; LIBPATH="$environment_path"; export PATH LIBPATH
+        local_user=$(lreg -getp '\environment\\{{ stale_stats_domain }}' localusername 2>/dev/null)
+        local_group=$(id -gn "$local_user") || exit 12
+        cer_temp_path=$(sg "$local_group" -c '/bin/ksh -l -c '\''print "$cer_temp"'\''') || exit 13
+        suffix=""; if [[ "{{ stale_stats_operation_name }}" = "runner" ]]; then suffix="_$(hostname -s)"; fi
+        done_marker="${cer_temp_path}/codex_dbstats_{{ stale_stats_operation_name }}${suffix}.done"
+        if [[ ! -f "$done_marker" ]] && pgrep -f -- '^/bin/ksh -l {{ stale_stats_script_path | regex_escape }}$' >/dev/null 2>&1; then
+          print "ALREADY_ACTIVE={{ stale_stats_script_path }}"; exit 0
+        fi
+        rm -f "$done_marker"
+        sg "$local_group" -c 'nohup /bin/ksh -l {{ stale_stats_script_path }} </dev/null >/dev/null 2>&1 &'
+        print "STARTED={{ stale_stats_script_path }}"
+        print "LOG=${cer_temp_path}/codex_dbstats_{{ stale_stats_operation_name }}${suffix}.log"
+        print "DONE=$done_marker"
+      args:
+        executable: /bin/ksh
+      register: stale_stats_launch
+      changed_when: "'STARTED=' in stale_stats_launch.stdout"
+      when: stale_stats_action in stale_stats_launch_actions
+
+    - name: Report detached operation paths
+      ansible.builtin.debug:
+        var: stale_stats_launch.stdout_lines
+      when: stale_stats_action in stale_stats_launch_actions
+
+    - name: Inspect skill-owned logs, markers, and processes
+      ansible.builtin.shell: |
+        environment_path=$(/cerner/mgr/linuxx86-64/get_definition -env {{ stale_stats_domain | quote }} -def LIBPATH)
+        PATH="$PATH:$environment_path"; LIBPATH="$environment_path"; export PATH LIBPATH
+        local_user=$(lreg -getp '\environment\\{{ stale_stats_domain }}' localusername 2>/dev/null)
+        local_group=$(id -gn "$local_user") || exit 12
+        cer_temp_path=$(sg "$local_group" -c '/bin/ksh -l -c '\''print "$cer_temp"'\''') || exit 13
+        found=0
+        for log in "$cer_temp_path"/codex_dbstats_*.log; do
+          [[ -f "$log" ]] || continue; found=1; marker="${log%.log}.done"
+          line_count=$(wc -l < "$log" | tr -d ' ')
+          command_count=$(grep -c 'Command executed!' "$log" 2>/dev/null || true)
+          session_count=$(grep -c 'SESSION COMPLETE' "$log" 2>/dev/null || true)
+          fatal_count=$(grep -Eic 'ORA-|(^|[^[:alpha:]])(ERROR|FAILED|FAILURE)([^[:alpha:]]|$)' "$log" 2>/dev/null || true)
+          latest_work=$(grep -Ei 'Gathering (table|index) statistics|table \(|index \(' "$log" 2>/dev/null | tail -1 || true)
+          [[ -f "$marker" ]] && marker_state=COMPLETE || marker_state=ACTIVE_OR_INCOMPLETE
+          print "LOG=$log|MARKER=$marker_state|LINES=$line_count|COMMANDS=$command_count|SESSIONS=$session_count|FATALS=$fatal_count|LATEST=$latest_work"
+        done
+        [[ $found -eq 1 ]] || print "NO_SKILL_LOGS"
+        active_count=$(pgrep -af -- '/tmp/codex_dbstats_(preview|queue|runner|publish)_[^ ]+\.ksh' 2>/dev/null | wc -l | tr -d ' ')
+        print "ACTIVE_SKILL_PROCESSES=$active_count"
+        print "EXPECTED_NOT_QUEUED={{ stale_stats_expected_not_queued_effective | join(',') }}"
+      args:
+        executable: /bin/ksh
+      register: stale_stats_status
+      changed_when: false
+      when: stale_stats_action in ['status', 'audit']
+
+    - name: Report status and audit evidence
+      ansible.builtin.debug:
+        var: stale_stats_status.stdout_lines
+      when: stale_stats_action in ['status', 'audit']

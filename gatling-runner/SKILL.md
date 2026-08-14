@@ -10,26 +10,30 @@ description: Run a Gatling scenario from local YAML files against a remote Linux
 - or multiple scenario names (batch mode)
 - target alias (supported: `ablfhir`) or explicit host/user/auth
 - auth mode: either SSH key path (`-KeyPath`) or password (`-Password` / `GATLING_SSH_PASSWORD`)
+- application credential: set `GATLING_CONFIG_PASSWORD` before a normal run, or explicitly supply both forced password parameters
 
 ## Alias Mapping
 - `ablfhir` resolves to:
 - `HostName = 10.191.200.22`
 - `UserName = root`
-- `KeyPath = %USERPROFILE%/.ssh/id_gatling`
+- `KeyPath = C:/Users/prakash/.ssh/id_gatling`
 
 ## Workflow
 1. Resolve scenario folder from `C:/Users/prakash/Desktop/project/NBS/gatling/script/<scenario-name>`.
 2. Stage `config.yaml`, `scenario.yaml`, and `scenario-data.yaml`, then compress them into a single `tar.gz` for transfer.
 3. Replace `MillDomain` with `ablfhir` in `config.yaml` and `scenario-data.yaml` before upload.
-   - Set `verboseLogging` in `config.yaml` from `-VerboseLogging` (default `true`).
+   - Set `verboseLogging` in `config.yaml` from `-VerboseLogging`.
+   - Default behavior: if run is for more than 1 user (`startUsers > 1` or `endUsers > 1`), `verboseLogging` defaults to `false` unless explicitly requested otherwise with `-VerboseLogging:$true`.
+   - Single-user default remains `true` unless overridden.
    - Force `authority: ablfhir` in both `config.yaml` and `scenario-data.yaml`.
-   - Force `password: c0630system` in `config.yaml`.
-   - Force `password: scale` in `scenario-data.yaml`.
+   - Force `password: ${GATLING_CONFIG_PASSWORD}` in `config.yaml`.
+   - Force `password: ${GATLING_CONFIG_PASSWORD}` in `scenario-data.yaml`.
 4. Set `scenario.yaml` values before upload from run arguments:
 `durationSeconds` from `-DurationSeconds` (default `1`)
 `rampDurationSeconds` from `-RampDurationSeconds` (default `0`)
 `startUsers` from `-StartUsers` (default `1`)
 `endUsers` from `-EndUsers` (default `1`)
+   - when `-UsernameOverride` is used and `user_id` is resolved from DB, update `scenario-data.yaml` `user_id` and, if `appinfo` exists, update only the embedded `UPDT_ID` bytes inside base64 `appinfo` (byte-preserving; no other bytes changed)
 5. Create a unique remote temp folder under `/root/gatling/templ-<id>`, upload one compressed archive, extract remotely, and remove temp artifacts after run completion.
 6. Execute:
 `java -jar gatling-crank-executor.jar ./testrun ./report false 0 > gatling.testrun.out`
@@ -39,7 +43,9 @@ description: Run a Gatling scenario from local YAML files against a remote Linux
 10. Generate local HTML report in `C:/Users/prakash/Desktop/project/NBS/gatling/reports/<scenario-name>/<scenario-name>-<yyyyMMddHHmmss>.html` (timestamp is current local date-time in numeric format only):
    - Search reply files recursively under the scenario folder with names matching `replies*.yaml` (prefer files under `Results/`)
    - Add a `Failed Transaction Counts by Type` summary section above the `Failed Transactions` table, including total failed transactions grouped by failure type (for example `KO`, `Failed to build request`, `Failure in replies.yaml`, and other parsed error categories)
+   - Report policy: suppress `response status 0` in report output (do not include it as a failure category and do not display `0` in the `Response Status` column)
    - Summary table includes `Transaction`, `KO / Error`, `replies.yaml`, and `Recommendation`
+   - Sort failed transactions by transaction number in ascending order by default (applies to summary table and per-transaction detail sections)
    - `replies.yaml` summary column includes both status and matched reply file name (for example: `Failure in replies.yaml (replies_PhysDoc.yaml)`)
    - Includes KO entries (`KO > 0`) from Requests and error entries from Errors section (including wrapped multi-line `Failed to build request` rows from `.out` logs)
    - Transaction name is clickable and jumps to a detailed section for that transaction
@@ -78,6 +84,9 @@ Alias mode (`ablfhir`):
 Report-only from existing `.out` (no remote run):
 `pwsh C:/Users/prakash/.codex/skills/gatling-runner/scripts/run_gatling_remote.ps1 -ScenarioName <scenario-name> -ReportOnlyOutPath "C:/Users/prakash/Desktop/project/NBS/gatling/reports/<scenario-name>/<scenario-name>-<timestamp>.out"`
 
+Report parser backend selection:
+`pwsh C:/Users/prakash/.codex/skills/gatling-runner/scripts/run_gatling_remote.ps1 -ScenarioName <scenario-name> -ReportOnlyOutPath "<out-file>" -ReportParserEngine auto`
+
 Explicit SSH key auth:
 `pwsh C:/Users/prakash/.codex/skills/gatling-runner/scripts/run_gatling_remote.ps1 -ScenarioName <scenario-name> -KeyPath "C:/Users/prakash/.ssh/id_gatling" -HostName 10.191.200.22 -UserName root`
 
@@ -108,7 +117,8 @@ Examples with unified launcher:
 - Use background/monitored mode only when the user explicitly asks to run in background.
 - If the user does not explicitly request background execution, do not start background jobs.
 
-- Requires OpenSSH (`ssh`/`scp`) for key mode.
+- Requires OpenSSH (ssh/scp) for key mode.
+- If SSH key path access is denied for C:/Users/prakash/.ssh/id_gatling in sandboxed runs, rerun the same command with elevated permissions so the runner process can read the key file.
 - Requires `Posh-SSH` module for password mode.
 - Uses `tar` for local archive creation and remote extraction to reduce transfer overhead.
 - Use only one auth mode at a time: `-KeyPath` or password.
@@ -116,17 +126,16 @@ Examples with unified launcher:
 - If the user prompt says `on ablfhir`, call the script with `-TargetAlias ablfhir`.
 - If the user asks to run for `N` users, populate `N` rows in `scenario-data.yaml` `globalDataSets` and run with `-EndUsers N` (and `-StartUsers 1` unless user says otherwise).
 - The runner enforces `authority=ablfhir` in staged YAML files before remote execution.
-- For `ablfhir`, the runner enforces `password=c0630system` in staged `config.yaml`.
-- The runner enforces `password=scale` in staged `scenario-data.yaml`.
+- For `ablfhir`, the runner enforces `password=${GATLING_CONFIG_PASSWORD}` in staged `config.yaml`.
+- The runner enforces `password=${GATLING_CONFIG_PASSWORD}` in staged `scenario-data.yaml`.
 - Report layout policy: all per-scenario reports/artifacts must be written under `C:/Users/prakash/Desktop/project/NBS/gatling/reports/<scenario-name>/` (reuse folder if present).
 - Report/log naming policy: per-run HTML report and `.out` log filenames must include current local timestamp in numeric format only (`yyyyMMddHHmmss`).
 - Dependency evidence policy: for missing-token failures, prioritize source transaction request/response extraction from anywhere in the log (for example source request around line `98428` and response around line `413874`) rather than only nearby lines.
+- Report parser engine policy:
+  - `-ReportParserEngine auto` (default): try Python fast parser first, fallback to PowerShell parser on failure.
+  - `-ReportParserEngine python`: require Python parser (fail if unavailable).
+  - `-ReportParserEngine powershell`: force legacy PowerShell parser.
+  - Fast parser writes a sidecar cache `<out>.report-index.json` keyed by out-file path/size/mtime; report HTML content remains the same.
 - Execution policy for this skill: start/continue execution immediately without skill-level confirmation prompts.
 - Prefer the unified launcher `run_skill_script.ps1` so one approved command pattern can cover current and newly-added scripts in this skill.
 - If the platform requires a first-time prefix approval, approve once and reuse the same launcher pattern for future non-interactive runs.
-
-
-
-
-
-

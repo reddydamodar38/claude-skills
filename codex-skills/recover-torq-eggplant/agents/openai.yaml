@@ -1,0 +1,4 @@
+interface:
+  display_name: "Recover TORQ Eggplant"
+  short_description: "Recover stuck TORQ Eggplant injector runs"
+  default_prompt: "Use $recover-torq-eggplant to diagnose and recover this stuck TORQ Eggplant build."

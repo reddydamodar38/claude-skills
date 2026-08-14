@@ -15,6 +15,7 @@ description: Connect to Oracle DB using sqlplus/SQLcl and run SQL queries with e
 - Password can be provided by:
   - `-Password`
   - `ORACLE_DB_PASSWORD` environment variable
+  - alias-specific variables: `FPABL_DB_PASSWORD`, `ABLFHIR_DB_PASSWORD`, or `FPSG_DB_PASSWORD`
 - Optional output settings:
   - `-OutputFormat table|csv|json`
   - `-OutFile` for saving result text
@@ -24,7 +25,7 @@ description: Connect to Oracle DB using sqlplus/SQLcl and run SQL queries with e
 
 - `FPSG`
   - `UserName`: `v500`
-  - `Password`: `CERner##_123ORA`
+  - `Password`: `${FPSG_DB_PASSWORD}`
   - `ConnectionString`: `10.37.174.186:1521/sfpsg.world`
 ## Workflow
 1. Validate Oracle client availability (`sqlplus` preferred, fallback `sql`).
@@ -47,9 +48,8 @@ Run query (hard lock always applies):
 `pwsh -NoProfile -File "C:/Users/prakash/.codex/skills/sqlplus/scripts/run_oracle_query.ps1" -DbEnv "ABLFHIR" -Query "select * from dual"`
 
 ## Notes
-- Alias mode (`-DbEnv`) auto-loads username/password/connection.
+- Alias mode (`-DbEnv`) auto-loads username and connection details, then reads the matching alias-specific password environment variable.
 - Explicit mode allows full override for any other Oracle environment.
 - For non-SELECT statements, script exits non-zero on Oracle errors.
 - Hard lock: non-read-only SQL is blocked before executing against Oracle.
 - Keep long SQL in `-QueryFile` to avoid escaping issues.
-

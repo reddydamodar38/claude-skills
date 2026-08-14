@@ -1,0 +1,9 @@
+{
+  "stale_stats_domain": "another-domain",
+  "expected_effective": [
+    "DM_INFO",
+    "DM_STAT_TABLE",
+    "DM_PROCESS_EVENT",
+    "DM_PROCESS"
+  ]
+}

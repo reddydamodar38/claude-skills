@@ -1,0 +1,358 @@
+{
+    "run":  "baseline",
+    "inventory":  [
+                      {
+                          "relative_path":  "NODE1\\awr_report.txt",
+                          "node":  "NODE1",
+                          "category":  "awr",
+                          "length":  121,
+                          "last_write_utc":  "2026-07-02T17:36:15.7931081Z",
+                          "sha256":  "fe512a9ccabf92099e31fdd19d31a9f801a7a8062e606297cca6abd21f292d54",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      },
+                      {
+                          "relative_path":  "NODE1\\cmb_397_20260601.log",
+                          "node":  "NODE1",
+                          "category":  "cmb",
+                          "length":  20,
+                          "last_write_utc":  "2026-07-02T17:36:15.7971088Z",
+                          "sha256":  "ca5bf341712bfaba38b684f4a6f47753553d3e3b00d3c7b3aaa9c2f29df2edb0",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      },
+                      {
+                          "relative_path":  "NODE1\\db_summary.txt",
+                          "node":  "NODE1",
+                          "category":  "database",
+                          "length":  79,
+                          "last_write_utc":  "2026-07-02T17:36:15.7901078Z",
+                          "sha256":  "e532d6afaf5f765a210839bfecee8d9e9c53a6a2ce4e7a3e461472f34672e26c",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      },
+                      {
+                          "relative_path":  "NODE1\\gc_SCP397.log",
+                          "node":  "NODE1",
+                          "category":  "gc",
+                          "length":  75,
+                          "last_write_utc":  "2026-07-02T17:36:15.7861080Z",
+                          "sha256":  "ebb47b5cf7e3ce2f1e3da01f600a0bc2cd56577bc0ccb1f416108e5976979e95",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      },
+                      {
+                          "relative_path":  "NODE1\\meminfo.txt",
+                          "node":  "NODE1",
+                          "category":  "node-memory",
+                          "length":  57,
+                          "last_write_utc":  "2026-07-02T17:36:15.7808074Z",
+                          "sha256":  "5fe46c8164be81d5988b8fd6067943a4c4af42d25f9aeb7af41c59cb64796ba6",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      },
+                      {
+                          "relative_path":  "NODE1\\mystery.xyz",
+                          "node":  "NODE1",
+                          "category":  "unknown",
+                          "length":  13,
+                          "last_write_utc":  "2026-07-02T17:36:15.7981086Z",
+                          "sha256":  "8cb977fa6523e91607924cdfc0e6986ecf7945d153629cd5a771c7b8359c4d12",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      },
+                      {
+                          "relative_path":  "NODE1\\ndump_SCP397_20260601.log",
+                          "node":  "NODE1",
+                          "category":  "ndump",
+                          "length":  31,
+                          "last_write_utc":  "2026-07-02T17:36:15.7951085Z",
+                          "sha256":  "6005fa65ccdbdf80ebd64e8eb06ddcbf8b11dc88310d71ea0cf2d0432b6997fd",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      },
+                      {
+                          "relative_path":  "NODE1\\regdump.txt",
+                          "node":  "NODE1",
+                          "category":  "configuration",
+                          "length":  85,
+                          "last_write_utc":  "2026-07-02T17:36:15.7891081Z",
+                          "sha256":  "949be35f2bbd97b8007246946084413ef74cc672ed92d20c26d4bdac9562a0ae",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      },
+                      {
+                          "relative_path":  "NODE1\\scps_397_smaps_end.txt",
+                          "node":  "NODE1",
+                          "category":  "smaps",
+                          "length":  64,
+                          "last_write_utc":  "2026-07-02T17:36:15.7841025Z",
+                          "sha256":  "3604f4261158b5c3af5bb2d46441e83d0a38b8ca0ab02e0b0e25f6d8e91fc3d4",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      },
+                      {
+                          "relative_path":  "NODE1\\server_memory.csv",
+                          "node":  "NODE1",
+                          "category":  "server-memory",
+                          "length":  52,
+                          "last_write_utc":  "2026-07-02T17:36:15.7818072Z",
+                          "sha256":  "916899224b1c169ad398ad290ccc40cb5037407b6ea7e6510826b39ae6f084c3",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      },
+                      {
+                          "relative_path":  "NODE1\\sql_stats.csv",
+                          "node":  "NODE1",
+                          "category":  "sql",
+                          "length":  123,
+                          "last_write_utc":  "2026-07-02T17:36:15.7921086Z",
+                          "sha256":  "71fb9701c5c258b8838b3d845b6869a599c69ddd0c298e8a07f298c69b8871a8",
+                          "is_duplicate":  false,
+                          "duplicate_of":  null
+                      }
+                  ],
+    "records":  [
+                    {
+                        "kind":  "awr",
+                        "node":  "NODE1",
+                        "key":  "ABL|ABL1|DB Time",
+                        "values":  {
+                                       "period":  "100-101",
+                                       "unit":  "seconds",
+                                       "database":  "ABL",
+                                       "instance":  "ABL1",
+                                       "value":  600,
+                                       "metric":  "DB Time",
+                                       "duration_minutes":  60,
+                                       "workload":  null
+                                   },
+                        "source":  "NODE1\\awr_report.txt",
+                        "confidence":  "medium"
+                    },
+                    {
+                        "kind":  "awr",
+                        "node":  "NODE1",
+                        "key":  "ABL|ABL1|DB CPU",
+                        "values":  {
+                                       "period":  "100-101",
+                                       "unit":  "seconds",
+                                       "database":  "ABL",
+                                       "instance":  "ABL1",
+                                       "value":  300,
+                                       "metric":  "DB CPU",
+                                       "duration_minutes":  60,
+                                       "workload":  null
+                                   },
+                        "source":  "NODE1\\awr_report.txt",
+                        "confidence":  "medium"
+                    },
+                    {
+                        "kind":  "cmb",
+                        "node":  "NODE1",
+                        "key":  "NODE1|397",
+                        "values":  {
+                                       "warnings_errors":  1,
+                                       "timestamp":  "2026-07-02T17:36:15.7971088Z",
+                                       "size_mb":  1.9073486328125E-05,
+                                       "server_id":  "397",
+                                       "signatures":  [
+                                                          "WARN slow response"
+                                                      ]
+                                   },
+                        "source":  "NODE1\\cmb_397_20260601.log",
+                        "confidence":  "high"
+                    },
+                    {
+                        "kind":  "database",
+                        "node":  "NODE1",
+                        "key":  "ABL|ABL1|SGA MB",
+                        "values":  {
+                                       "instance":  "ABL1",
+                                       "database":  "ABL",
+                                       "metric":  "SGA MB",
+                                       "value":  4096,
+                                       "unit":  "MB"
+                                   },
+                        "source":  "NODE1\\db_summary.txt",
+                        "confidence":  "medium"
+                    },
+                    {
+                        "kind":  "database",
+                        "node":  "NODE1",
+                        "key":  "ABL|ABL1|PGA MB",
+                        "values":  {
+                                       "instance":  "ABL1",
+                                       "database":  "ABL",
+                                       "metric":  "PGA MB",
+                                       "value":  1024,
+                                       "unit":  "MB"
+                                   },
+                        "source":  "NODE1\\db_summary.txt",
+                        "confidence":  "medium"
+                    },
+                    {
+                        "kind":  "database",
+                        "node":  "NODE1",
+                        "key":  "ABL|ABL1|DB Time",
+                        "values":  {
+                                       "instance":  "ABL1",
+                                       "database":  "ABL",
+                                       "metric":  "DB Time",
+                                       "value":  600,
+                                       "unit":  "seconds"
+                                   },
+                        "source":  "NODE1\\db_summary.txt",
+                        "confidence":  "medium"
+                    },
+                    {
+                        "kind":  "database",
+                        "node":  "NODE1",
+                        "key":  "ABL|ABL1|DB CPU",
+                        "values":  {
+                                       "instance":  "ABL1",
+                                       "database":  "ABL",
+                                       "metric":  "DB CPU",
+                                       "value":  300,
+                                       "unit":  "seconds"
+                                   },
+                        "source":  "NODE1\\db_summary.txt",
+                        "confidence":  "medium"
+                    },
+                    {
+                        "kind":  "gc",
+                        "node":  "NODE1",
+                        "key":  "NODE1|397",
+                        "values":  {
+                                       "before_gc_mb":  300,
+                                       "after_gc_mb":  200,
+                                       "server_id":  "397",
+                                       "pause_ms":  100
+                                   },
+                        "source":  "NODE1\\gc_SCP397.log",
+                        "confidence":  "medium"
+                    },
+                    {
+                        "kind":  "node-memory",
+                        "node":  "NODE1",
+                        "key":  "NODE1",
+                        "values":  {
+                                       "available_mb":  8000,
+                                       "total_mb":  16000,
+                                       "used_mb":  8000
+                                   },
+                        "source":  "NODE1\\meminfo.txt",
+                        "confidence":  "high"
+                    },
+                    {
+                        "kind":  "ndump",
+                        "node":  "NODE1",
+                        "key":  "NODE1|397",
+                        "values":  {
+                                       "timestamp":  "2026-07-02T17:36:15.7951085Z",
+                                       "size_mb":  2.956390380859375E-05,
+                                       "server_instance":  "397",
+                                       "signature":  "ORA-00600 internal error code"
+                                   },
+                        "source":  "NODE1\\ndump_SCP397_20260601.log",
+                        "confidence":  "medium"
+                    },
+                    {
+                        "kind":  "config",
+                        "node":  "NODE1",
+                        "key":  "NODE1|397",
+                        "values":  {
+                                       "gc_logging":  true,
+                                       "xms_mb":  170,
+                                       "jvmargs":  "-Xms170M -Xmx512M -XX:+UseG1GC -Xloggc:gc.log",
+                                       "server_id":  "397",
+                                       "collector":  "G1",
+                                       "xmx_mb":  512
+                                   },
+                        "source":  "NODE1\\regdump.txt",
+                        "confidence":  "high"
+                    },
+                    {
+                        "kind":  "instances",
+                        "node":  "NODE1",
+                        "key":  "NODE1|397",
+                        "values":  {
+                                       "server_id":  "397",
+                                       "configured_instances":  2
+                                   },
+                        "source":  "NODE1\\regdump.txt",
+                        "confidence":  "high"
+                    },
+                    {
+                        "kind":  "smaps",
+                        "node":  "NODE1",
+                        "key":  "NODE1|397",
+                        "values":  {
+                                       "private_dirty_mb":  100,
+                                       "server_id":  "397",
+                                       "pss_mb":  200
+                                   },
+                        "source":  "NODE1\\scps_397_smaps_end.txt",
+                        "confidence":  "medium"
+                    },
+                    {
+                        "kind":  "server-memory",
+                        "node":  "NODE1",
+                        "key":  "NODE1|SCP397",
+                        "values":  {
+                                       "pid":  "111",
+                                       "rss_mb":  400,
+                                       "server_id":  "SCP397",
+                                       "private_mb":  300
+                                   },
+                        "source":  "NODE1\\server_memory.csv",
+                        "confidence":  "high"
+                    },
+                    {
+                        "kind":  "sql",
+                        "node":  "NODE1",
+                        "key":  "ABL|abc123",
+                        "values":  {
+                                       "elapsed_ms":  1000,
+                                       "module_schema":  null,
+                                       "buffer_gets":  2000,
+                                       "cpu_ms":  500,
+                                       "disk_reads":  20,
+                                       "plan_hash":  777,
+                                       "sql_id":  "abc123",
+                                       "executions":  10,
+                                       "rows":  100,
+                                       "database":  "ABL"
+                                   },
+                        "source":  "NODE1\\sql_stats.csv",
+                        "confidence":  "high"
+                    }
+                ],
+    "zip_entries":  [
+
+                    ],
+    "errors":  [
+                   {
+                       "run":  "baseline",
+                       "node":  "NODE1",
+                       "category":  "cmb",
+                       "server_database":  "397",
+                       "timestamp":  "2026-07-02T17:36:15.7971088Z",
+                       "severity":  "Warning",
+                       "signature_message":  "WARN slow response",
+                       "count":  1,
+                       "source":  "NODE1\\cmb_397_20260601.log"
+                   },
+                   {
+                       "run":  "baseline",
+                       "node":  "NODE1",
+                       "category":  "ndump",
+                       "server_database":  "397",
+                       "timestamp":  "2026-07-02T17:36:15.7951085Z",
+                       "severity":  "Error",
+                       "signature_message":  "ORA-00600 internal error code",
+                       "count":  1,
+                       "source":  "NODE1\\ndump_SCP397_20260601.log"
+                   }
+               ]
+}

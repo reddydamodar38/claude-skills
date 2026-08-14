@@ -33,17 +33,17 @@ $ErrorActionPreference = 'Stop'
 $DbProfiles = @{
     FPABL = @{
         UserName = 'v500'
-        Password = 'CERner##_123ORA'
+        PasswordEnvironment = 'FPABL_DB_PASSWORD'
         ConnectionString = '10.37.163.164:1521/sfpabl.world'
     }
     ABLFHIR = @{
         UserName = 'v500'
-        Password = 'v500'
+        PasswordEnvironment = 'ABLFHIR_DB_PASSWORD'
         ConnectionString = '10.191.200.24:1521/sfpabl.world'
     }
     FPSG = @{
         UserName = 'v500'
-        Password = 'CERner##_123ORA'
+        PasswordEnvironment = 'FPSG_DB_PASSWORD'
         ConnectionString = '10.37.174.186:1521/sfpsg.world'
     }
 }
@@ -72,6 +72,52 @@ function Resolve-SqlClient {
     throw "Oracle client not found. Install Oracle Instant Client (sqlplus) or SQLcl (sql), then retry."
 }
 
+function Remove-SqlComments {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Text
+    )
+
+    # Strip block comments first, then line comments.
+    $withoutBlock = [regex]::Replace($Text, '(?s)/\*.*?\*/', '')
+    return [regex]::Replace($withoutBlock, '(?m)--.*$', '')
+}
+
+function Test-SelectOnlySql {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Sql
+    )
+
+    $clean = (Remove-SqlComments -Text $Sql).Trim()
+    if ([string]::IsNullOrWhiteSpace($clean)) {
+        return $false
+    }
+
+    # Allow SELECT and WITH (CTE that resolves to SELECT).
+    if ($clean -notmatch '^(?is)\s*(select|with)\b') {
+        return $false
+    }
+
+    # Reject obvious non-read-only verbs anywhere in the text.
+    $blocked = @(
+        'insert','update','delete','merge',
+        'alter','drop','truncate','create','rename','comment',
+        'grant','revoke',
+        'begin','declare',
+        'commit','rollback',
+        'execute','exec','call'
+    )
+
+    foreach ($verb in $blocked) {
+        if ($clean -match ("(?i)\b{0}\b" -f [regex]::Escape($verb))) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 if ([string]::IsNullOrWhiteSpace($Query) -and [string]::IsNullOrWhiteSpace($QueryFile)) {
     throw "Provide either -Query or -QueryFile."
 }
@@ -92,7 +138,11 @@ if (-not [string]::IsNullOrWhiteSpace($DbEnv)) {
     }
 
     if ([string]::IsNullOrWhiteSpace($Password)) {
-        $Password = $profile.Password
+        $passwordEnvironment = [string]$profile.PasswordEnvironment
+        $Password = [Environment]::GetEnvironmentVariable($passwordEnvironment, 'Process')
+        if ([string]::IsNullOrWhiteSpace($Password)) {
+            throw "Password not provided. Use -Password or set $passwordEnvironment for -DbEnv $DbEnv."
+        }
     }
 
     if ([string]::IsNullOrWhiteSpace($ConnectionString) -and [string]::IsNullOrWhiteSpace($TnsName)) {
@@ -131,9 +181,15 @@ $sqlText = if ($QueryFile) {
     }
     $q
 }
+
+if (-not (Test-SelectOnlySql -Sql $sqlText)) {
+    throw "Query blocked by hard lock. Only read-only SELECT/CTE SQL is allowed."
+}
 $sqlClient = Resolve-SqlClient
 
 $tempFile = Join-Path $env:TEMP ("oracle-query-" + [Guid]::NewGuid().ToString() + ".sql")
+$stdoutFile = Join-Path $env:TEMP ("oracle-query-" + [Guid]::NewGuid().ToString() + ".stdout.txt")
+$stderrFile = Join-Path $env:TEMP ("oracle-query-" + [Guid]::NewGuid().ToString() + ".stderr.txt")
 
 try {
     $settings = @()
@@ -175,15 +231,23 @@ try {
 
     $login = "{0}/{1}@{2}" -f $UserName, $Password, $target
 
-    $output = & $sqlClient.Path -S $login "@$tempFile" 2>&1
+    $exeEsc = '"' + $sqlClient.Path.Replace('"', '""') + '"'
+    $scriptArg = '@"' + $tempFile.Replace('"', '""') + '"'
+    $stdoutEsc = '"' + $stdoutFile.Replace('"', '""') + '"'
+    $stderrEsc = '"' + $stderrFile.Replace('"', '""') + '"'
+    $cmdLine = "$exeEsc -S $login $scriptArg 1> $stdoutEsc 2> $stderrEsc"
+    & cmd /c $cmdLine
     $exitCode = $LASTEXITCODE
+    $stdout = if (Test-Path $stdoutFile) { Get-Content -Raw -Path $stdoutFile } else { "" }
+    $stderr = if (Test-Path $stderrFile) { Get-Content -Raw -Path $stderrFile } else { "" }
+    $combined = @($stdout, $stderr) -join [Environment]::NewLine
 
     if ($exitCode -ne 0) {
-        $joined = ($output | Out-String).Trim()
+        $joined = $combined.Trim()
         throw "Oracle query failed (exit $exitCode).`n$joined"
     }
 
-    $text = ($output | Out-String).Trim()
+    $text = $combined.Trim()
 
     if ($OutFile) {
         Set-Content -Path $OutFile -Value $text -Encoding UTF8
@@ -194,7 +258,13 @@ try {
 }
 finally {
     if (Test-Path $tempFile) {
-        Remove-Item -Path $tempFile -Force
+        Remove-Item -Path $tempFile -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $stdoutFile) {
+        Remove-Item -Path $stdoutFile -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $stderrFile) {
+        Remove-Item -Path $stderrFile -Force -ErrorAction SilentlyContinue
     }
 }
 

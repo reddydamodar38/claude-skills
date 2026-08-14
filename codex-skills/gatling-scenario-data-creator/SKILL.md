@@ -20,19 +20,24 @@ description: Generate and refresh scenario-data.yaml globalDataSets for already-
 - `PatientSimpleQuery` (optional): simple patient query or `WHERE` predicate; skill extracts/uses predicate and frames full `patient.sql`
 - `SkipSqlplusValidation` (optional switch): skip local SQLplus preview validation
 - `TargetAlias` (optional): `ablfhir` (default)
+- Set `GATLING_CONFIG_PASSWORD` and the selected database environment variable before running.
 
 ## DB Environments
 - `fpabl`
   - `dbusername=v500`
-  - `dbpassword=CERner##_123ORA`
+  - `dbpassword=${FPABL_DB_PASSWORD}`
   - `dburl=10.37.163.164:1521/sfpabl.world`
 - `ablfhir`
   - `dbusername=v500`
-  - `dbpassword=v500`
+  - `dbpassword=${ABLFHIR_DB_PASSWORD}`
   - `dburl=10.191.200.24:1521/sfpabl.world`
 - `fpabl-alt`
   - `dbusername=v500`
-  - `dbpassword=CERner##_123ORA`
+  - `dbpassword=${FPABL_ALT_DB_PASSWORD}`
+  - `dburl=10.37.163.164:1521/sfpabl.world`
+- `fpabl2`
+  - `dbusername=v500`
+  - `dbpassword=${FPABL2_DB_PASSWORD}`
   - `dburl=10.37.163.164:1521/sfpabl.world`
 
 ## Workflow
@@ -62,7 +67,7 @@ description: Generate and refresh scenario-data.yaml globalDataSets for already-
    - for existing keys, update values from generator output when matching keys are present
    - if `appinfo` key already exists, treat it as base64-encoded binary: decode, update only embedded `UPDT_ID` value bytes, then re-encode; do not duplicate/add another `appinfo`
    - preserve existing-key casing/order from current `globalDataSets`
-   - enforce `authority=ablfhir`, `password=scale`, `current_dt_tm={currentDateTime}` only when those keys already exist
+   - enforce `authority=ablfhir`, `password=${GATLING_CONFIG_PASSWORD}`, `current_dt_tm={currentDateTime}` only when those keys already exist
    - keep existing keys that are not produced by jar with their previous values
    - preserve all generated globalDataSets rows (do not collapse to a single row)
 11. Cleanup remote and local temp directories.

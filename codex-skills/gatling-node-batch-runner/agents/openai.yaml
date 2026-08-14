@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gatling Node Batch Runner"
+  short_description: "Run sequential Gatling workflows safely"
+  default_prompt: "Use $gatling-node-batch-runner to start, check, or stop the prepared Gatling node batch."

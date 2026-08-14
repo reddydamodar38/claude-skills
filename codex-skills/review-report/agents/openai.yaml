@@ -1,0 +1,7 @@
+interface:
+  display_name: "Review Report"
+  short_description: "Review HTML performance report deltas"
+  default_prompt: "Use $review-report to review this HTML performance report and produce delta-based review comments."
+
+policy:
+  allow_implicit_invocation: true

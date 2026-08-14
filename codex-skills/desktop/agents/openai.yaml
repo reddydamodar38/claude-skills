@@ -1,0 +1,4 @@
+interface:
+  display_name: "Desktop Runner"
+  short_description: "Run commands on the desktop runner"
+  default_prompt: "Use $desktop to run this command on dh2vpc067."

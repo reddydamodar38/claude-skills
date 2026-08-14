@@ -1,0 +1,3 @@
+SCP397.jvmargs = -Xms256M -Xmx768M -XX:+UseG1GC -Xloggc:gc.log
+SCP397.instances = 3
+
